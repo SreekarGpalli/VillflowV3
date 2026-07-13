@@ -70,3 +70,20 @@ open observations (report-only, not fixed):
 - [minor] About page shows "Version 3.0.0 (MSVC Build)" / footer "3.0.0-p4" while tauri.conf.json says 0.1.0 — cosmetic version drift invented by the UI, not from spec.
 - [minor] Tauri CLI warns the identifier `com.villflow.app` ends in `.app` (conflicts with macOS bundle extension). Irrelevant for Windows; revisit before any Mac build.
 - [minor] `npm audit`: 2 advisories (1 moderate, 1 high) in the vite 5.x dev-dependency tree; dev-time only, consider bumping vite later.
+
+## V7 — 2026-07-13 (full audit fix pass)
+
+build: PASS   clippy: PASS (`--all-targets -D warnings`)   tests: PASS (44: 32 vf-cloud + 3 vf-core + 7 vf-engine + 2 vf-store)   npm run build: PASS
+
+Critical/high fixes applied:
+- hotkeys: bare Z/X/C key-up no longer swallowed system-wide; hook install signals success/failure; `hotkeys::shutdown()` on engine Shutdown; tray Quit sends `EngineCmd::Shutdown`
+- STT: `open` awaits handshake; connect/commit timeouts; pre-commit errors preserved; send-fail reconnect; word-boundary HTTP status parse; buffer until `session_started`
+- Groq: shared client with connect + request timeouts
+- settings: corrupt JSON → backup + defaults; insights daily_words dictation-only; dictionary validation/NOCASE index/deduped bump; relative-date store tests; clippy bool asserts fixed
+- engine: duration from key-down; empty transcript abort; command re-check selection; auto-learn HWND pin + better align; audio buffer/flush; caret-near field context (tail cap); headless Ctrl+C shutdown
+- UI/app: `system_default` wire value; autostart quoted path + save-then-registry; local heatmap dates; version 0.1.0; system fonts; scratchpad allowlist sanitize; start_minimized no flash (`visible: false`)
+
+Remaining known (not fully eliminable here):
+- production UI still requires Tauri CLI build (not plain `cargo build`) — documented in README
+- npm audit vite/esbuild dev advisories (dev-only)
+- full live PTT e2e not re-run in this pass (unit/integration + previous V6 live smoke)

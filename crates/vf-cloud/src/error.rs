@@ -15,6 +15,9 @@ pub enum CloudError {
     #[error("STT session closed before commit")]
     SessionClosed,
 
+    #[error("STT timed out: {0}")]
+    Timeout(String),
+
     #[error("STT WebSocket error: {0}")]
     WebSocket(String),
 

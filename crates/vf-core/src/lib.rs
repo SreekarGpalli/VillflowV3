@@ -332,3 +332,47 @@ pub trait Store: Send + Sync {
     // Insights
     fn insights_summary(&self) -> anyhow::Result<InsightsSummary>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn injection_method_wire_names() {
+        let paste = serde_json::to_string(&InjectionMethod::ClipboardPaste).unwrap();
+        assert_eq!(paste, "\"clipboard_paste\"");
+        let typing = serde_json::to_string(&InjectionMethod::SendInputTyping).unwrap();
+        assert_eq!(typing, "\"sendinput_typing\"");
+        let back: InjectionMethod = serde_json::from_str("\"sendinput_typing\"").unwrap();
+        assert_eq!(back, InjectionMethod::SendInputTyping);
+    }
+
+    #[test]
+    fn cleanup_level_wire_names() {
+        for (level, name) in [
+            (CleanupLevel::None, "none"),
+            (CleanupLevel::Light, "light"),
+            (CleanupLevel::Medium, "medium"),
+            (CleanupLevel::High, "high"),
+        ] {
+            let s = serde_json::to_string(&level).unwrap();
+            assert_eq!(s, format!("\"{name}\""));
+            let back: CleanupLevel = serde_json::from_str(&s).unwrap();
+            assert_eq!(back, level);
+        }
+    }
+
+    #[test]
+    fn default_settings_match_contract() {
+        let s = default_settings();
+        assert_eq!(s.version, 1);
+        assert_eq!(s.hotkeys.dictation, "Ctrl+Shift+Z");
+        assert_eq!(s.audio.input_device, "system_default");
+        assert_eq!(s.llm.model, "openai/gpt-oss-120b");
+        assert_eq!(s.llm.cleanup_level, CleanupLevel::Medium);
+        assert_eq!(s.prompts.light, PROMPT_LIGHT);
+        assert_eq!(s.prompts.medium, PROMPT_MEDIUM);
+        assert_eq!(s.prompts.high, PROMPT_HIGH);
+        assert_eq!(s.prompts.command, PROMPT_COMMAND);
+    }
+}

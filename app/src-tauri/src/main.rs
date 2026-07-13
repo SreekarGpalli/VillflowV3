@@ -129,11 +129,11 @@ fn set_autostart(enabled: bool) -> Result<(), String> {
     if enabled {
         let current_exe = std::env::current_exe()
             .map_err(|e| format!("Failed to get current exe path: {e}"))?;
-        let current_exe_str = current_exe.to_string_lossy();
+        // Quote the path so spaces in Program Files etc. work under Run.
+        let val = format!("\"{}\"", current_exe.display());
         
         let (key, _) = hkcu.create_subkey(path)
             .map_err(|e| format!("Failed to open registry key: {e}"))?;
-        let val = current_exe_str.as_ref();
         key.set_value("VillFlow", &val)
             .map_err(|e| format!("Failed to write registry value: {e}"))?;
     } else {
@@ -234,6 +234,11 @@ fn main() {
                         }
                     }
                     "quit" => {
+                        if let Some(engine) = app.try_state::<EngineHandle>() {
+                            let _ = engine.send(vf_core::EngineCmd::Shutdown);
+                        }
+                        // Brief pause so the engine can unhook before process exit.
+                        std::thread::sleep(std::time::Duration::from_millis(150));
                         app.exit(0);
                     }
                     _ => {}
@@ -316,7 +321,6 @@ fn main() {
                 let _ = window.hide();
             }
         })
-        .on_menu_event(|_, _| {}) // satisfies callback requirement if needed
         .invoke_handler(tauri::generate_handler![
             get_settings,
             save_settings,

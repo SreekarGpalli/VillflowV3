@@ -1,5 +1,8 @@
 //! Groq LLM client — CONTRACTS §7.
 
+use std::sync::OnceLock;
+use std::time::Duration;
+
 use serde::Deserialize;
 
 use crate::error::{CloudError, CloudResult};
@@ -8,6 +11,19 @@ const GROQ_CHAT_URL: &str = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODELS_URL: &str = "https://api.groq.com/openai/v1/models";
 const TEMPERATURE: f64 = 0.2;
 const MAX_COMPLETION_TOKENS: u32 = 2048;
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+
+fn http_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .connect_timeout(CONNECT_TIMEOUT)
+            .timeout(REQUEST_TIMEOUT)
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
+}
 
 /// Strip wrapping quotes / markdown code fences from model output.
 ///
@@ -103,7 +119,6 @@ pub async fn chat_completion(
         return Err(CloudError::Groq("LLM API key is empty".into()));
     }
 
-    let client = reqwest::Client::new();
     let body = serde_json::json!({
         "model": model,
         "temperature": TEMPERATURE,
@@ -115,7 +130,7 @@ pub async fn chat_completion(
         ]
     });
 
-    let resp = client
+    let resp = http_client()
         .post(GROQ_CHAT_URL)
         .header("Authorization", format!("Bearer {api_key}"))
         .header("Content-Type", "application/json")
@@ -149,8 +164,7 @@ pub async fn list_models(api_key: &str) -> CloudResult<Vec<String>> {
         return Err(CloudError::Groq("LLM API key is empty".into()));
     }
 
-    let client = reqwest::Client::new();
-    let resp = client
+    let resp = http_client()
         .get(GROQ_MODELS_URL)
         .header("Authorization", format!("Bearer {api_key}"))
         .send()

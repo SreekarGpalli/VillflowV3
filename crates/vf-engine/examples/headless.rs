@@ -5,12 +5,12 @@
 //!   cargo run -p vf-engine --example headless -- path\to\settings.json
 //!
 //! Loads settings + SQLite store from `%APPDATA%\VillFlow\` (or the given settings path),
-//! starts the engine, and prints `EngineEvent`s to stdout until Ctrl+C / process kill.
+//! starts the engine, and prints `EngineEvent`s to stdout until Ctrl+C.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use vf_core::{EngineCmd, EngineEvent, EngineState};
+use vf_core::{EngineCmd, EngineEvent};
 use vf_engine::spawn;
 use vf_store::{get_default_db_path, get_default_settings_path, load_settings, SqliteStore};
 
@@ -37,9 +37,9 @@ fn main() {
     let mut events = handle.subscribe();
 
     println!("Engine started. Hold Ctrl+Shift+Z to dictate, Ctrl+Shift+X for command mode.");
+    println!("Press Ctrl+C to shut down cleanly.");
     println!("Events:");
 
-    // Block on events in a tiny tokio runtime (broadcast recv is async).
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -47,25 +47,29 @@ fn main() {
 
     rt.block_on(async move {
         loop {
-            match events.recv().await {
-                Ok(ev) => {
-                    print_event(&ev);
-                    if matches!(ev, EngineEvent::State(EngineState::Idle)) {
-                        // Keep running; Idle is normal.
-                    }
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                    eprintln!("(lagged {n} events)");
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                    eprintln!("event channel closed");
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {
+                    println!("Ctrl+C — shutting down…");
+                    let _ = handle.send(EngineCmd::Shutdown);
+                    // Give the engine a moment to unhook / hide overlay.
+                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
                     break;
+                }
+                ev = events.recv() => {
+                    match ev {
+                        Ok(ev) => print_event(&ev),
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                            eprintln!("(lagged {n} events)");
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            eprintln!("event channel closed");
+                            break;
+                        }
+                    }
                 }
             }
         }
     });
-
-    let _ = handle.send(EngineCmd::Shutdown);
 }
 
 fn print_event(ev: &EngineEvent) {

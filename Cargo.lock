@@ -4668,6 +4668,7 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",
@@ -5136,7 +5137,6 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 name = "vf-cloud"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "base64 0.22.1",
  "futures-util",
  "log",
@@ -5155,6 +5155,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -5164,7 +5165,6 @@ dependencies = [
  "anyhow",
  "arboard",
  "cpal",
- "dirs 5.0.1",
  "env_logger",
  "futures-util",
  "log",

@@ -54,6 +54,8 @@ fn inject_sendinput_typing(text: &str) -> anyhow::Result<()> {
     for ch in text.encode_utf16() {
         send_unicode(ch, false)?;
         send_unicode(ch, true)?;
+        // Tiny pacing so some hosts do not drop unicode input bursts.
+        thread::sleep(Duration::from_millis(1));
     }
     Ok(())
 }

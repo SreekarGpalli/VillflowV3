@@ -181,9 +181,11 @@ pub fn start(
         return Ok(rx);
     }
 
-    thread::Builder::new()
+    let (install_tx, install_rx) = std::sync::mpsc::channel::<Result<(), String>>();
+
+    let spawn_result = thread::Builder::new()
         .name("vf-hotkeys".into())
-        .spawn(|| {
+        .spawn(move || {
             unsafe {
                 let hook = SetWindowsHookExW(
                     WH_KEYBOARD_LL,
@@ -194,6 +196,7 @@ pub fn start(
                 match hook {
                     Ok(h) => {
                         *HOOK.lock().unwrap() = Some(SendHook(h));
+                        let _ = install_tx.send(Ok(()));
                         // Message pump required for LL hooks on this thread.
                         let mut msg = windows::Win32::UI::WindowsAndMessaging::MSG::default();
                         while windows::Win32::UI::WindowsAndMessaging::GetMessageW(
@@ -210,6 +213,7 @@ pub fn start(
                     }
                     Err(e) => {
                         log::error!("SetWindowsHookExW failed: {e}");
+                        let _ = install_tx.send(Err(e.to_string()));
                     }
                 }
             }
@@ -217,11 +221,51 @@ pub fn start(
             if let Ok(mut slot) = SHARED.lock() {
                 *slot = None;
             }
-        })?;
+        });
 
-    // Brief settle so the hook is installed before first keypress.
-    thread::sleep(Duration::from_millis(20));
-    Ok(rx)
+    if let Err(e) = spawn_result {
+        HOOK_THREAD_RUNNING.store(false, Ordering::SeqCst);
+        if let Ok(mut slot) = SHARED.lock() {
+            *slot = None;
+        }
+        return Err(anyhow::anyhow!("failed to spawn hotkey thread: {e}"));
+    }
+
+    // Wait for hook install success/failure (or a short timeout).
+    match install_rx.recv_timeout(Duration::from_secs(2)) {
+        Ok(Ok(())) => Ok(rx),
+        Ok(Err(e)) => {
+            if let Ok(mut slot) = SHARED.lock() {
+                *slot = None;
+            }
+            HOOK_THREAD_RUNNING.store(false, Ordering::SeqCst);
+            Err(anyhow::anyhow!("keyboard hook install failed: {e}"))
+        }
+        Err(_) => {
+            // Thread may still be starting; allow proceed but log.
+            log::warn!("hotkey hook install confirmation timed out");
+            Ok(rx)
+        }
+    }
+}
+
+/// Tear down the low-level keyboard hook and clear process-global state.
+pub fn shutdown() {
+    // Drop shared first so the hook proc passes events through.
+    if let Ok(mut slot) = SHARED.lock() {
+        *slot = None;
+    }
+    if let Ok(mut hook) = HOOK.lock() {
+        if let Some(SendHook(h)) = hook.take() {
+            unsafe {
+                let _ = UnhookWindowsHookEx(h);
+            }
+        }
+    }
+    // Nudge the hook thread message pump to exit if still running.
+    // PostThreadMessage requires the thread id; without it, Unhook above is enough
+    // for correctness — the GetMessage loop will exit when the process tears down.
+    HOOK_THREAD_RUNNING.store(false, Ordering::SeqCst);
 }
 
 pub fn update_combos(dictation: &str, command_mode: &str, scratchpad: &str) -> anyhow::Result<()> {
@@ -357,16 +401,11 @@ unsafe extern "system" fn low_level_proc(code: i32, wparam: WPARAM, lparam: LPAR
                 let _ = event_tx.send(HotkeyEvent::Up(id));
             }
         }
-        // Also swallow modifier/key ups that belong to a configured combo even if not engaged,
-        // when the key is part of a combo that is currently fully held (edge cases).
+        // Swallow key-ups that belong to a combo only when modifiers still match
+        // that combo (never bare main-key ups — that would eat Z/X/C system-wide).
         for combo in [&combos.dictation, &combos.command_mode, &combos.scratchpad] {
-            if combo_involves(combo, vk) && combo.matches_modifiers(ctrl, shift, alt, win)
-                || (combo.key_vk == vk)
-            {
-                // Swallow ups of the main key when modifiers still match the combo shape.
-                if combo.key_vk == vk {
-                    swallow = true;
-                }
+            if combo_involves(combo, vk) && combo.matches_modifiers(ctrl, shift, alt, win) {
+                swallow = true;
             }
         }
     }
@@ -435,6 +474,14 @@ mod tests {
     fn parse_case_insensitive() {
         let c = KeyCombo::parse("ctrl+shift+x").unwrap();
         assert_eq!(c.key_vk, b'X' as u16);
+    }
+
+    #[test]
+    fn bare_main_key_should_not_match_modifiers() {
+        // Regression: bare Z must not look like Ctrl+Shift+Z.
+        let c = KeyCombo::parse("Ctrl+Shift+Z").unwrap();
+        assert!(!c.matches_modifiers(false, false, false, false));
+        assert!(c.matches_modifiers(true, true, false, false));
     }
 
     #[test]

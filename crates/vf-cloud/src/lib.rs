@@ -19,5 +19,6 @@ pub use prompt::{
     PromptContext,
 };
 pub use stt::{
-    build_ws_url, encode_audio_chunk, KeyRotator, RotatableError, ServerMessage, SttSession,
+    build_ws_url, encode_audio_chunk, parse_rotatable_http_status, KeyRotator, RotatableError,
+    ServerMessage, SttSession,
 };

@@ -115,6 +115,7 @@ pub async fn run(
                     Some(EngineCmd::Shutdown) => {
                         rt.abort_active();
                         let _ = rt.overlay_tx.send(OverlayCmd::Shutdown);
+                        hotkeys::shutdown();
                         break;
                     }
                     Some(EngineCmd::ApplySettings(s)) => {
@@ -186,6 +187,8 @@ pub async fn run(
 }
 
 async fn begin_utterance(rt: &mut EngineRuntime, mode: UtteranceMode) {
+    // Clock from key-down (start of begin), not after STT open — §5 duration_ms.
+    let started = Instant::now();
     rt.set_state(EngineState::Recording);
     overlay::show_recording(&rt.overlay_tx, 0.0);
 
@@ -238,7 +241,7 @@ async fn begin_utterance(rt: &mut EngineRuntime, mode: UtteranceMode) {
 
     rt.active = Some(ActiveUtterance {
         mode,
-        started: Instant::now(),
+        started,
         context,
         stt,
         capture,
@@ -280,9 +283,41 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
         }
     };
 
+    // Empty / silence — do not inject or pollute history.
+    if raw_transcript.trim().is_empty() {
+        overlay::show_toast(&rt.overlay_tx, "No speech detected");
+        overlay::hide(&rt.overlay_tx);
+        rt.set_state(EngineState::Idle);
+        return;
+    }
+
     let mode = active.mode;
-    let ctx = active.context;
+    let mut ctx = active.context;
     let started = active.started;
+
+    // Command mode: re-check selection still exists before LLM/inject.
+    if mode == UtteranceMode::Command {
+        let still = tokio::task::spawn_blocking(context::read_selection_with_fallback)
+            .await
+            .ok()
+            .flatten();
+        if let Some(sel) = still {
+            if !sel.trim().is_empty() {
+                ctx.selection = Some(sel);
+            }
+        }
+        if ctx
+            .selection
+            .as_ref()
+            .map(|s| s.trim().is_empty())
+            .unwrap_or(true)
+        {
+            overlay::show_toast(&rt.overlay_tx, "Select text first");
+            overlay::hide(&rt.overlay_tx);
+            rt.set_state(EngineState::Idle);
+            return;
+        }
+    }
 
     let final_text = match mode {
         UtteranceMode::Dictation => {
@@ -403,10 +438,11 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
         total_ms,
     });
 
-    // Auto-learn + use_count bump (§15).
+    // Auto-learn + use_count bump (§15). Pin HWND from utterance start.
     autolearn::spawn_auto_learn(
         rt.store.clone(),
         final_text,
+        ctx.hwnd,
         rt.settings.dictionary.auto_learn,
         rt.event_tx.clone(),
     );

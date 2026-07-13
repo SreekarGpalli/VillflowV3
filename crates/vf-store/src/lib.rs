@@ -29,9 +29,24 @@ pub fn load_settings(path: &Path) -> anyhow::Result<Settings> {
     }
 
     // Missing fields on load -> filled from defaults via serde default attributes, then re-saved.
-    let settings: Settings = serde_json::from_str(&content)?;
-    save_settings(&settings, path)?;
-    Ok(settings)
+    match serde_json::from_str::<Settings>(&content) {
+        Ok(settings) => {
+            save_settings(&settings, path)?;
+            Ok(settings)
+        }
+        Err(e) => {
+            // Corrupt / invalid JSON: back up and recover with defaults so the app can launch.
+            let backup = path.with_extension("json.corrupt");
+            let _ = fs::copy(path, &backup);
+            log::warn!(
+                "settings.json unreadable ({e}); backed up to {} and restoring defaults",
+                backup.display()
+            );
+            let settings = Settings::default();
+            save_settings(&settings, path)?;
+            Ok(settings)
+        }
+    }
 }
 
 pub fn save_settings(settings: &Settings, path: &Path) -> anyhow::Result<()> {
@@ -41,8 +56,14 @@ pub fn save_settings(settings: &Settings, path: &Path) -> anyhow::Result<()> {
     
     let tmp_path = path.with_extension("tmp");
     let serialized = serde_json::to_string_pretty(settings)?;
-    fs::write(&tmp_path, serialized)?;
-    fs::rename(&tmp_path, path)?;
+    if let Err(e) = fs::write(&tmp_path, serialized) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(e.into());
+    }
+    if let Err(e) = fs::rename(&tmp_path, path) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(e.into());
+    }
     Ok(())
 }
 
@@ -88,6 +109,12 @@ impl SqliteStore {
             );",
             [],
         )?;
+        // Case-insensitive uniqueness for dictionary words (best-effort if legacy dups exist).
+        let _ = conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS dictionary_word_nocase
+             ON dictionary(word COLLATE NOCASE);",
+            [],
+        );
         
         conn.execute(
             "CREATE TABLE IF NOT EXISTS history (
@@ -101,6 +128,14 @@ impl SqliteStore {
               duration_ms INTEGER NOT NULL DEFAULT 0,
               word_count INTEGER NOT NULL DEFAULT 0
             );",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS history_ts_idx ON history(ts);",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS history_mode_idx ON history(mode);",
             [],
         )?;
         
@@ -119,6 +154,8 @@ impl SqliteStore {
              VALUES (1, '', strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'));",
             [],
         )?;
+
+        let _ = conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;");
         
         Ok(())
     }
@@ -148,11 +185,26 @@ impl Store for SqliteStore {
     }
 
     fn dictionary_add(&self, word: &str, source: &str) -> anyhow::Result<DictEntry> {
+        let word = word.trim();
+        if word.is_empty() {
+            anyhow::bail!("dictionary word cannot be empty");
+        }
+        let source = match source.trim() {
+            "auto" => "auto",
+            _ => "manual",
+        };
         let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("DB Mutex poisoned"))?;
         conn.execute(
             "INSERT INTO dictionary (word, source, created_at) VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'))",
             rusqlite::params![word, source],
-        )?;
+        ).map_err(|e| {
+            if let rusqlite::Error::SqliteFailure(code, _) = &e {
+                if code.code == rusqlite::ErrorCode::ConstraintViolation {
+                    return anyhow::anyhow!("dictionary word already exists: {word}");
+                }
+            }
+            anyhow::anyhow!(e)
+        })?;
         let id = conn.last_insert_rowid();
         Ok(DictEntry {
             id,
@@ -165,31 +217,58 @@ impl Store for SqliteStore {
 
     fn dictionary_delete(&self, id: i64) -> anyhow::Result<()> {
         let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("DB Mutex poisoned"))?;
-        conn.execute("DELETE FROM dictionary WHERE id = ?", rusqlite::params![id])?;
+        let n = conn.execute("DELETE FROM dictionary WHERE id = ?", rusqlite::params![id])?;
+        if n == 0 {
+            anyhow::bail!("dictionary entry not found: {id}");
+        }
         Ok(())
     }
 
     fn dictionary_update(&self, id: i64, word: &str) -> anyhow::Result<()> {
+        let word = word.trim();
+        if word.is_empty() {
+            anyhow::bail!("dictionary word cannot be empty");
+        }
         let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("DB Mutex poisoned"))?;
-        conn.execute("UPDATE dictionary SET word = ? WHERE id = ?", rusqlite::params![word, id])?;
+        let n = conn.execute(
+            "UPDATE dictionary SET word = ? WHERE id = ?",
+            rusqlite::params![word, id],
+        )?;
+        if n == 0 {
+            anyhow::bail!("dictionary entry not found: {id}");
+        }
         Ok(())
     }
 
     fn dictionary_toggle_star(&self, id: i64) -> anyhow::Result<()> {
         let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("DB Mutex poisoned"))?;
-        conn.execute(
-            "UPDATE dictionary SET starred = 1 - starred WHERE id = ?",
+        let n = conn.execute(
+            "UPDATE dictionary SET starred = CASE WHEN starred = 0 THEN 1 ELSE 0 END WHERE id = ?",
             rusqlite::params![id],
         )?;
+        if n == 0 {
+            anyhow::bail!("dictionary entry not found: {id}");
+        }
         Ok(())
     }
 
     fn dictionary_bump_use_count(&self, words: &[String]) -> anyhow::Result<()> {
+        // Dedupe case-insensitively so one appearance per utterance → one bump.
+        let mut seen = std::collections::HashSet::new();
+        let unique: Vec<&str> = words
+            .iter()
+            .map(|w| w.trim())
+            .filter(|w| !w.is_empty())
+            .filter(|w| seen.insert(w.to_ascii_lowercase()))
+            .collect();
+        if unique.is_empty() {
+            return Ok(());
+        }
         let mut conn = self.conn.lock().map_err(|_| anyhow::anyhow!("DB Mutex poisoned"))?;
         let tx = conn.transaction()?;
         {
             let mut stmt = tx.prepare("UPDATE dictionary SET use_count = use_count + 1 WHERE word = ? COLLATE NOCASE")?;
-            for word in words {
+            for word in unique {
                 stmt.execute(rusqlite::params![word])?;
             }
         }
@@ -236,7 +315,7 @@ impl Store for SqliteStore {
         let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("DB Mutex poisoned"))?;
         let mut stmt = conn.prepare(
             "SELECT id, ts, app_name, window_title, mode, raw_transcript, final_text, duration_ms, word_count 
-             FROM history ORDER BY ts DESC LIMIT ? OFFSET ?"
+             FROM history ORDER BY ts DESC, id DESC LIMIT ? OFFSET ?"
         )?;
         let rows = stmt.query_map(rusqlite::params![limit, offset], |row| {
             Ok(HistoryEntry {
@@ -324,11 +403,12 @@ impl Store for SqliteStore {
             top_apps.push(r?);
         }
         
-        // 4. Daily words (last 365 days)
+        // 4. Daily words (last 365 days) — dictation only, consistent with total_words / avg WPM.
         let mut stmt_daily = conn.prepare(
             "SELECT SUBSTR(ts, 1, 10) as day, SUM(word_count) 
              FROM history 
-             WHERE SUBSTR(ts, 1, 10) >= date('now', 'localtime', '-365 days') 
+             WHERE mode = 'dictation'
+               AND SUBSTR(ts, 1, 10) >= date('now', 'localtime', '-365 days') 
              GROUP BY day 
              ORDER BY day ASC"
         )?;
@@ -367,7 +447,7 @@ mod tests {
         // Test 1: Load from non-existent file creates default settings
         let mut settings = load_settings(&temp_path).expect("Failed to load settings");
         assert_eq!(settings.version, 1);
-        assert_eq!(settings.general.start_minimized, false);
+        assert!(!settings.general.start_minimized);
         assert_eq!(settings.llm.cleanup_level, CleanupLevel::Medium);
         assert!(temp_path.exists());
 
@@ -376,7 +456,7 @@ mod tests {
         save_settings(&settings, &temp_path).expect("Failed to save settings");
 
         let loaded = load_settings(&temp_path).expect("Failed to reload settings");
-        assert_eq!(loaded.general.start_minimized, true);
+        assert!(loaded.general.start_minimized);
 
         // Test 3: Load from partial/missing-field JSON
         let _ = std::fs::remove_file(&temp_path);
@@ -386,10 +466,23 @@ mod tests {
         let loaded_partial = load_settings(&temp_path).expect("Failed to load partial settings");
         assert_eq!(loaded_partial.llm.api_key, "secret_key");
         assert_eq!(loaded_partial.llm.model, "openai/gpt-oss-120b"); // default filled
-        assert_eq!(loaded_partial.general.show_error_notifications, true); // default filled
+        assert!(loaded_partial.general.show_error_notifications); // default filled
+
+        // Test 4: Corrupt JSON recovers with defaults
+        let _ = std::fs::remove_file(&temp_path);
+        std::fs::write(&temp_path, "{not valid json").expect("write corrupt");
+        let recovered = load_settings(&temp_path).expect("recover from corrupt");
+        assert_eq!(recovered.version, 1);
+        assert!(temp_path.with_extension("json.corrupt").exists()
+            || path_has_corrupt_backup(&temp_path));
 
         // Clean up
         let _ = std::fs::remove_file(&temp_path);
+        let _ = std::fs::remove_file(temp_path.with_extension("json.corrupt"));
+    }
+
+    fn path_has_corrupt_backup(path: &std::path::Path) -> bool {
+        path.with_extension("json.corrupt").exists()
     }
 
     #[test]
@@ -410,7 +503,7 @@ mod tests {
         let entry = store.dictionary_add("testword", "manual").expect("Failed to add word");
         assert_eq!(entry.word, "testword");
         assert_eq!(entry.source, "manual");
-        assert_eq!(entry.starred, false);
+        assert!(!entry.starred);
         assert_eq!(entry.use_count, 0);
 
         let list = store.dictionary_list().expect("Failed to list dictionary");
@@ -419,7 +512,7 @@ mod tests {
 
         store.dictionary_toggle_star(entry.id).expect("Failed to toggle star");
         let list_starred = store.dictionary_list().expect("Failed to list dictionary after star");
-        assert_eq!(list_starred[0].starred, true);
+        assert!(list_starred[0].starred);
 
         store.dictionary_bump_use_count(&["testword".to_string()]).expect("Failed to bump use count");
         let list_bumped = store.dictionary_list().expect("Failed to list dictionary after bump");
@@ -433,10 +526,13 @@ mod tests {
         store.dictionary_delete(entry.id).expect("Failed to delete word");
         assert!(store.dictionary_list().expect("Failed to list after delete").is_empty());
 
-        // 3. History & Insights test
+        // 3. History & Insights test — relative local dates so the 365-day window stays valid.
+        let today = local_date_offset(0);
+        let yesterday = local_date_offset(-1);
+
         let h1 = HistoryEntry {
             id: None,
-            ts: "2026-07-01T12:00:00-04:00".to_string(),
+            ts: format!("{yesterday}T12:00:00"),
             app_name: "notepad.exe".to_string(),
             window_title: "Untitled - Notepad".to_string(),
             mode: "dictation".to_string(),
@@ -449,7 +545,7 @@ mod tests {
 
         let h2 = HistoryEntry {
             id: None,
-            ts: "2026-07-02T13:00:00-04:00".to_string(),
+            ts: format!("{today}T13:00:00"),
             app_name: "chrome.exe".to_string(),
             window_title: "Google".to_string(),
             mode: "dictation".to_string(),
@@ -462,7 +558,7 @@ mod tests {
 
         let h_cmd = HistoryEntry {
             id: None,
-            ts: "2026-07-02T14:00:00-04:00".to_string(),
+            ts: format!("{today}T14:00:00"),
             app_name: "chrome.exe".to_string(),
             window_title: "Google".to_string(),
             mode: "command".to_string(),
@@ -481,11 +577,11 @@ mod tests {
         assert_eq!(history[1].mode, "dictation");
 
         let insights = store.insights_summary().expect("Failed to get insights");
-        // total_words = 1 + 3 = 4
+        // total_words = 1 + 3 = 4 (command excluded)
         assert_eq!(insights.total_words, 4);
         // avg_wpm:
         // dictation rows word count = 1 + 3 = 4
-        // dictation rows duration = 1000 + 2000 = 3000 ms = 3.0 seconds = 0.05 minutes
+        // dictation rows duration = 1000 + 2000 = 3000 ms = 0.05 minutes
         // avg_wpm = 4 / 0.05 = 80.0
         assert_eq!(insights.avg_wpm, 80.0);
 
@@ -494,11 +590,21 @@ mod tests {
         assert_eq!(insights.top_apps[0], ("chrome.exe".to_string(), 2));
         assert_eq!(insights.top_apps[1], ("notepad.exe".to_string(), 1));
 
-        // daily_words:
-        // 2026-07-01: 1 word
-        // 2026-07-02: 6 words
+        // daily_words: dictation only
+        // yesterday: 1 word, today: 3 words (command excluded)
         assert_eq!(insights.daily_words.len(), 2);
-        assert_eq!(insights.daily_words[0], ("2026-07-01".to_string(), 1));
-        assert_eq!(insights.daily_words[1], ("2026-07-02".to_string(), 6));
+        assert_eq!(insights.daily_words[0], (yesterday, 1));
+        assert_eq!(insights.daily_words[1], (today, 3));
+    }
+
+    /// Local calendar date as `YYYY-MM-DD`, offset by whole days from today.
+    fn local_date_offset(days: i64) -> String {
+        let conn = rusqlite::Connection::open_in_memory().expect("mem");
+        conn.query_row(
+            "SELECT date('now', 'localtime', ?)",
+            rusqlite::params![format!("{days} days")],
+            |row| row.get(0),
+        )
+        .expect("date")
     }
 }

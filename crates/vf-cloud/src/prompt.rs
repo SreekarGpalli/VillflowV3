@@ -46,15 +46,19 @@ pub fn format_dictionary(words: &[String]) -> String {
     }
 }
 
-fn apply_dictation_placeholders(template: &str, ctx: &PromptContext) -> String {
+/// Resolve all §9 placeholders in a template string.
+fn apply_placeholders(
+    template: &str,
+    ctx: &PromptContext,
+    instruction: &str,
+    selection: &str,
+) -> String {
     template
         .replace("{dictionary}", &format_dictionary(&ctx.dictionary))
         .replace("{app_name}", &resolve_placeholder(&ctx.app_name))
         .replace("{field_context}", &resolve_placeholder(&ctx.field_context))
-}
-
-fn apply_command_system_placeholders(template: &str, ctx: &PromptContext) -> String {
-    template.replace("{app_name}", &resolve_placeholder(&ctx.app_name))
+        .replace("{instruction}", &resolve_placeholder(instruction))
+        .replace("{selection}", &resolve_placeholder(selection))
 }
 
 /// Build dictation (system, user) for a cleanup level.
@@ -74,14 +78,14 @@ pub fn build_dictation(
         CleanupLevel::High => &prompts.high,
     };
     Some(ChatMessages {
-        system: apply_dictation_placeholders(template, ctx),
+        system: apply_placeholders(template, ctx, "", ""),
         user: raw_transcript.to_string(),
     })
 }
 
 /// Build command-mode (system, user) messages.
 ///
-/// System = resolved PROMPT_COMMAND (`{app_name}` only).
+/// System = resolved PROMPT_COMMAND (all placeholders).
 /// User = `INSTRUCTION:\n{instruction}\n\nTEXT:\n{selection}` with empty → `(none)`.
 pub fn build_command(
     prompts: &PromptsSettings,
@@ -89,7 +93,7 @@ pub fn build_command(
     instruction: &str,
     selection: &str,
 ) -> ChatMessages {
-    let system = apply_command_system_placeholders(&prompts.command, ctx);
+    let system = apply_placeholders(&prompts.command, ctx, instruction, selection);
     let user = format!(
         "INSTRUCTION:\n{}\n\nTEXT:\n{}",
         resolve_placeholder(instruction),

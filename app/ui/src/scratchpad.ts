@@ -6,29 +6,37 @@ let saveStatus: HTMLSpanElement | null = null;
 let wordCountDisplay: HTMLSpanElement | null = null;
 let debounceTimeout: number | null = null;
 
+/** Allowlisted tags for scratchpad rich text (bold/italic/lists). */
+const ALLOWED_TAGS = new Set([
+  "B", "I", "EM", "STRONG", "U", "UL", "OL", "LI", "P", "BR", "DIV", "SPAN",
+]);
+
 function sanitizeHtml(html: string): string {
   const temp = document.createElement("div");
   temp.innerHTML = html;
-  
-  const scripts = temp.getElementsByTagName("script");
-  while (scripts.length > 0) {
-    scripts[0].parentNode?.removeChild(scripts[0]);
-  }
 
-  const allElements = temp.getElementsByTagName("*");
-  for (let i = 0; i < allElements.length; i++) {
-    const el = allElements[i];
-    const attrs = Array.from(el.attributes);
-    for (const attr of attrs) {
-      if (attr.name.startsWith("on")) {
-        el.removeAttribute(attr.name);
-      }
-      if (attr.name === "href" && attr.value.trim().toLowerCase().startsWith("javascript:")) {
-        el.removeAttribute(attr.name);
+  const walk = (node: Node) => {
+    const children = Array.from(node.childNodes);
+    for (const child of children) {
+      if (child.nodeType === Node.ELEMENT_NODE) {
+        const el = child as HTMLElement;
+        if (!ALLOWED_TAGS.has(el.tagName)) {
+          // Unwrap disallowed tags (keep text children).
+          while (el.firstChild) {
+            node.insertBefore(el.firstChild, el);
+          }
+          node.removeChild(el);
+          continue;
+        }
+        // Strip all attributes (no href/on*/style XSS vectors).
+        for (const attr of Array.from(el.attributes)) {
+          el.removeAttribute(attr.name);
+        }
+        walk(el);
       }
     }
-  }
-
+  };
+  walk(temp);
   return temp.innerHTML;
 }
 

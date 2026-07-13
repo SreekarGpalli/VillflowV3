@@ -35,6 +35,23 @@ pub struct FocusContext {
     pub field_context: String,
     /// Current selection if any (Command Mode).
     pub selection: Option<String>,
+    /// Foreground HWND at capture time (for auto-learn re-read of same window).
+    pub hwnd: isize,
+}
+
+thread_local! {
+    static COM_INIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn ensure_com() {
+    COM_INIT.with(|c| {
+        if !c.get() {
+            unsafe {
+                let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            }
+            c.set(true);
+        }
+    });
 }
 
 /// Read focus context. Never panics; returns empty defaults on total failure.
@@ -46,18 +63,18 @@ pub fn read_focus_context() -> FocusContext {
         if hwnd.0.is_null() {
             return ctx;
         }
+        ctx.hwnd = hwnd.0 as isize;
         ctx.window_title = window_title(hwnd);
         ctx.app_name = process_exe_name(hwnd).unwrap_or_default();
 
-        // UIA needs COM on this thread.
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        ensure_com();
 
         if let Ok(automation) =
             CoCreateInstance::<_, IUIAutomation>(&CUIAutomation, None, CLSCTX_INPROC_SERVER)
         {
             if let Ok(el) = automation.GetFocusedElement() {
-                if let Some(text) = element_text(&automation, &el) {
-                    ctx.field_context = truncate_chars(&text, FIELD_CONTEXT_CAP);
+                if let Some(text) = element_text_near_caret(&automation, &el) {
+                    ctx.field_context = truncate_tail_chars(&text, FIELD_CONTEXT_CAP);
                 }
                 if let Some(sel) = element_selection(&el) {
                     if !sel.trim().is_empty() {
@@ -262,31 +279,60 @@ unsafe fn process_exe_name(hwnd: HWND) -> Option<String> {
     Some(name)
 }
 
-unsafe fn element_text(
+/// Prefer text near the caret / selection; fall back to full value (tail-capped later).
+unsafe fn element_text_near_caret(
     automation: &IUIAutomation,
     el: &IUIAutomationElement,
 ) -> Option<String> {
-    // Prefer Value pattern.
+    // Text pattern: selection range first (caret neighborhood), else full document.
+    if let Ok(unk) = el.GetCurrentPattern(UIA_TextPatternId) {
+        if let Ok(text_pat) = unk.cast::<IUIAutomationTextPattern>() {
+            // Prefer selection / caret range if present.
+            if let Ok(ranges) = text_pat.GetSelection() {
+                if let Ok(len) = ranges.Length() {
+                    if len > 0 {
+                        if let Ok(r) = ranges.GetElement(0) {
+                            // Expand context: get surrounding text via GetText with a large cap.
+                            if let Ok(bstr) = r.GetText(FIELD_CONTEXT_CAP as i32) {
+                                let s = bstr.to_string();
+                                if !s.is_empty() {
+                                    // Also pull full document and take the window ending at selection
+                                    // when selection is short (caret-only).
+                                    if s.chars().count() < 40 {
+                                        if let Ok(doc) = text_pat.DocumentRange() {
+                                            if let Ok(full) = doc.GetText(-1) {
+                                                let full_s = full.to_string();
+                                                if !full_s.is_empty() {
+                                                    return Some(full_s);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    return Some(s);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if let Ok(range) = text_pat.DocumentRange() {
+                if let Ok(bstr) = range.GetText(-1) {
+                    let s = bstr.to_string();
+                    if !s.is_empty() {
+                        return Some(s);
+                    }
+                }
+            }
+        }
+    }
+
+    // Prefer Value pattern (common for inputs) — take tail as "near caret".
     if let Ok(unk) = el.GetCurrentPattern(UIA_ValuePatternId) {
         if let Ok(pat) = unk.cast::<IUIAutomationValuePattern>() {
             if let Ok(bstr) = pat.CurrentValue() {
                 let s = bstr.to_string();
                 if !s.is_empty() {
                     return Some(s);
-                }
-            }
-        }
-    }
-
-    // Text pattern document range.
-    if let Ok(unk) = el.GetCurrentPattern(UIA_TextPatternId) {
-        if let Ok(text_pat) = unk.cast::<IUIAutomationTextPattern>() {
-            if let Ok(range) = text_pat.DocumentRange() {
-                if let Ok(bstr) = range.GetText(FIELD_CONTEXT_CAP as i32) {
-                    let s = bstr.to_string();
-                    if !s.is_empty() {
-                        return Some(s);
-                    }
                 }
             }
         }
@@ -347,16 +393,36 @@ unsafe fn element_selection(el: &IUIAutomationElement) -> Option<String> {
     }
 }
 
-fn truncate_chars(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
+/// Keep the *tail* of long text so context is near the caret (end of field).
+fn truncate_tail_chars(s: &str, max: usize) -> String {
+    let count = s.chars().count();
+    if count <= max {
         s.to_string()
     } else {
-        s.chars().take(max).collect()
+        s.chars().skip(count - max).collect()
     }
 }
 
-/// Re-read the focused element's text (for auto-learn). Best-effort.
+/// Re-read text for auto-learn. Prefer the same HWND as injection time when possible.
+#[allow(dead_code)]
 pub fn reread_focused_text() -> Option<String> {
+    reread_text_for_hwnd(None)
+}
+
+/// Re-read field text, optionally requiring the same window HWND as at inject time.
+pub fn reread_text_for_hwnd(target_hwnd: Option<isize>) -> Option<String> {
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.0.is_null() {
+            return None;
+        }
+        if let Some(want) = target_hwnd {
+            if want != 0 && (hwnd.0 as isize) != want {
+                // Focus moved — silent no-op per §15.
+                return None;
+            }
+        }
+    }
     let ctx = read_focus_context();
     if ctx.field_context.is_empty() {
         None

@@ -115,7 +115,8 @@ fn run_capture_loop(
     let in_hz = config.sample_rate.0;
     let channels = config.channels as usize;
 
-    let (raw_tx, raw_rx) = std::sync::mpsc::sync_channel::<Vec<f32>>(32);
+    // Larger bound reduces silent frame drops under resampler/consumer load.
+    let (raw_tx, raw_rx) = std::sync::mpsc::sync_channel::<Vec<f32>>(256);
 
     let stream = match sample_format {
         SampleFormat::F32 => build_stream::<f32>(&device, &config, channels, raw_tx)?,
@@ -192,6 +193,32 @@ fn run_capture_loop(
             .is_err()
         {
             break;
+        }
+    }
+
+    // Flush residual resampler input so the end of the utterance is not clipped.
+    if let Some(ref mut rs) = resampler {
+        if !pending.is_empty() {
+            let chunk_size = rs.input_frames_next();
+            if chunk_size > 0 {
+                while pending.len() < chunk_size {
+                    pending.push(0.0);
+                }
+                let input: Vec<f32> = pending.drain(..chunk_size).collect();
+                let waves = vec![input];
+                if let Ok(out) = rs.process(&waves, None) {
+                    if let Some(ch0) = out.into_iter().next() {
+                        if !ch0.is_empty() {
+                            let rms = rms_level(&ch0);
+                            let pcm = f32_to_s16le(&ch0);
+                            let _ = tx.send(AudioChunk {
+                                pcm_s16le: pcm,
+                                rms,
+                            });
+                        }
+                    }
+                }
+            }
         }
     }
 

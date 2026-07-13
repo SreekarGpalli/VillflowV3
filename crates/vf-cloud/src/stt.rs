@@ -10,12 +10,10 @@
 //!   `session_started`, `partial_transcript` { text }, `committed_transcript` { text },
 //!   plus error types: `auth_error`, `quota_exceeded`, `rate_limited`, `resource_exhausted`, etc.
 
-use std::sync::Arc;
-
 use base64::Engine as _;
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
-use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
+use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio_tungstenite::{
     connect_async,
     tungstenite::{client::IntoClientRequest, http::StatusCode, Message},
@@ -26,6 +24,9 @@ use crate::error::{CloudError, CloudResult};
 
 const SAMPLE_RATE: i32 = 16_000;
 const PATH: &str = "/v1/speech-to-text/realtime";
+const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+const COMMIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+const SESSION_STARTED_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 // ---------------------------------------------------------------------------
 // Key rotation state machine (pure — unit-tested with no network)
@@ -207,23 +208,40 @@ pub struct SttSession {
 impl SttSession {
     /// Open a session for one utterance.
     ///
-    /// Connects with the first API key immediately. Audio is buffered for the
-    /// lifetime of the utterance so mid-utterance reconnect can re-send it.
+    /// Awaits a successful WebSocket handshake (with key rotation) before
+    /// returning. Audio is buffered for the lifetime of the utterance so
+    /// mid-utterance reconnect can re-send it.
     pub async fn open(settings: SttSettings, keyterms: Vec<String>) -> CloudResult<Self> {
         let rotator = KeyRotator::new(settings.api_keys.clone())?;
         let (cmd_tx, cmd_rx) = mpsc::channel::<SessionCmd>(64);
         let (partial_tx, _) = broadcast::channel::<String>(32);
+        let (ready_tx, ready_rx) = oneshot::channel::<CloudResult<()>>();
 
         let partial_for_task = partial_tx.clone();
         let join = tokio::spawn(async move {
-            session_loop(settings, keyterms, rotator, cmd_rx, partial_for_task).await;
+            session_loop(settings, keyterms, rotator, cmd_rx, partial_for_task, ready_tx).await;
         });
 
-        Ok(Self {
-            cmd_tx,
-            partial_tx,
-            join,
-        })
+        match tokio::time::timeout(CONNECT_TIMEOUT, ready_rx).await {
+            Ok(Ok(Ok(()))) => Ok(Self {
+                cmd_tx,
+                partial_tx,
+                join,
+            }),
+            Ok(Ok(Err(e))) => {
+                let _ = join.await;
+                Err(e)
+            }
+            Ok(Err(_)) => {
+                let _ = join.await;
+                Err(CloudError::SessionClosed)
+            }
+            Err(_) => {
+                // Task may still be running; drop cmd_tx by abandoning Self — abort join.
+                join.abort();
+                Err(CloudError::Timeout("STT connect timed out".into()))
+            }
+        }
     }
 
     /// Subscribe to partial transcripts (optional overlay preview).
@@ -247,8 +265,12 @@ impl SttSession {
             .send(SessionCmd::Commit { reply: reply_tx })
             .await
             .map_err(|_| CloudError::SessionClosed)?;
-        let result = reply_rx.await.map_err(|_| CloudError::SessionClosed)?;
-        // Best-effort join; ignore if already finished.
+        let result = match tokio::time::timeout(COMMIT_TIMEOUT, reply_rx).await {
+            Ok(Ok(r)) => r,
+            Ok(Err(_)) => Err(CloudError::SessionClosed),
+            Err(_) => Err(CloudError::Timeout("STT commit timed out".into())),
+        };
+        // Best-effort join; ignore if already finished / aborted.
         let _ = self.join.await;
         result
     }
@@ -260,15 +282,24 @@ async fn session_loop(
     mut rotator: KeyRotator,
     mut cmd_rx: mpsc::Receiver<SessionCmd>,
     partial_tx: broadcast::Sender<String>,
+    ready_tx: oneshot::Sender<CloudResult<()>>,
 ) {
-    let audio_buffer: Arc<Mutex<Vec<Vec<u8>>>> = Arc::new(Mutex::new(Vec::new()));
+    let mut audio_buffer: Vec<Vec<u8>> = Vec::new();
     let mut commit_reply: Option<oneshot::Sender<CloudResult<String>>> = None;
+    let mut last_error: Option<CloudError> = None;
+    let mut held_transcript: Option<String> = None;
+    let mut session_started = false;
+    let mut dead = false;
 
     // Establish initial connection (with rotation on handshake failures).
     let mut conn = match connect_with_rotation(&settings, &keyterms, &mut rotator).await {
-        Ok(c) => c,
+        Ok(c) => {
+            let _ = ready_tx.send(Ok(()));
+            c
+        }
         Err(e) => {
-            // Drain until Commit so the caller gets the error.
+            // Surface the structured error to open(); keep the same error for a late Commit.
+            let _ = ready_tx.send(Err(CloudError::msg(e.to_string())));
             while let Some(cmd) = cmd_rx.recv().await {
                 if let SessionCmd::Commit { reply } = cmd {
                     let _ = reply.send(Err(e));
@@ -279,83 +310,94 @@ async fn session_loop(
         }
     };
 
+    // Best-effort wait for session_started before first audio (buffered until then).
+    let started_deadline = tokio::time::Instant::now() + SESSION_STARTED_TIMEOUT;
+
     loop {
+        if dead {
+            // Only accept Commit so the caller gets `last_error`.
+            match cmd_rx.recv().await {
+                Some(SessionCmd::Commit { reply }) => {
+                    let err = last_error
+                        .take()
+                        .unwrap_or(CloudError::SessionClosed);
+                    let _ = reply.send(Err(err));
+                    return;
+                }
+                Some(SessionCmd::Audio(_)) => continue,
+                None => return,
+            }
+        }
+
         tokio::select! {
             biased;
 
             cmd = cmd_rx.recv() => {
                 match cmd {
-                    None => {
-                        // Caller dropped without commit.
-                        break;
-                    }
+                    None => break,
                     Some(SessionCmd::Audio(chunk)) => {
-                        audio_buffer.lock().await.push(chunk.clone());
-                        if let Err(e) = send_audio(&mut conn, &chunk, false).await {
-                            if let Some(re) = e.rotatable {
-                                match reconnect_and_resend(
-                                    &settings,
-                                    &keyterms,
-                                    &mut rotator,
-                                    &audio_buffer,
-                                    re,
-                                    &e.message,
-                                ).await {
-                                    Ok(c) => conn = c,
-                                    Err(err) => {
-                                        if let Some(reply) = commit_reply.take() {
-                                            let _ = reply.send(Err(err));
-                                        }
-                                        // Keep draining for a late Commit.
-                                        while let Some(c) = cmd_rx.recv().await {
-                                            if let SessionCmd::Commit { reply } = c {
-                                                let _ = reply.send(Err(CloudError::SessionClosed));
-                                                return;
-                                            }
-                                        }
-                                        return;
-                                    }
-                                }
-                            } else if let Some(reply) = commit_reply.take() {
-                                let _ = reply.send(Err(CloudError::WebSocket(e.message)));
-                                return;
-                            }
+                        audio_buffer.push(chunk.clone());
+                        if !session_started && tokio::time::Instant::now() < started_deadline {
+                            // Keep buffering; flush once session_started (or deadline via WS path).
+                            continue;
+                        }
+                        if let Err(err) = send_audio_or_reconnect(
+                            &mut conn,
+                            &chunk,
+                            false,
+                            &settings,
+                            &keyterms,
+                            &mut rotator,
+                            &audio_buffer,
+                        ).await {
+                            last_error = Some(err);
+                            dead = true;
                         }
                     }
                     Some(SessionCmd::Commit { reply }) => {
-                        commit_reply = Some(reply);
-                        // Send final commit chunk (empty PCM is valid for commit-only).
-                        if let Err(e) = send_audio(&mut conn, &[], true).await {
-                            if let Some(re) = e.rotatable {
-                                match reconnect_and_resend(
+                        // Flush any buffered-only audio if we never got session_started.
+                        if !session_started {
+                            for chunk in &audio_buffer {
+                                if let Err(err) = send_audio_or_reconnect(
+                                    &mut conn,
+                                    chunk,
+                                    false,
                                     &settings,
                                     &keyterms,
                                     &mut rotator,
                                     &audio_buffer,
-                                    re,
-                                    &e.message,
                                 ).await {
-                                    Ok(mut c) => {
-                                        // After resend of buffered audio, send commit.
-                                        if let Err(e2) = send_audio(&mut c, &[], true).await {
-                                            if let Some(r) = commit_reply.take() {
-                                                let _ = r.send(Err(CloudError::WebSocket(e2.message)));
-                                            }
-                                            return;
-                                        }
-                                        conn = c;
-                                    }
-                                    Err(err) => {
-                                        if let Some(r) = commit_reply.take() {
-                                            let _ = r.send(Err(err));
-                                        }
-                                        return;
-                                    }
+                                    let _ = reply.send(Err(err));
+                                    return;
                                 }
-                            } else if let Some(r) = commit_reply.take() {
-                                let _ = r.send(Err(CloudError::WebSocket(e.message)));
-                                return;
                             }
+                            session_started = true;
+                        }
+
+                        if let Some(t) = held_transcript.take() {
+                            let _ = reply.send(Ok(t));
+                            let _ = conn.ws.close(None).await;
+                            return;
+                        }
+                        if let Some(err) = last_error.take() {
+                            let _ = reply.send(Err(err));
+                            return;
+                        }
+
+                        commit_reply = Some(reply);
+                        if let Err(err) = send_audio_or_reconnect(
+                            &mut conn,
+                            &[],
+                            true,
+                            &settings,
+                            &keyterms,
+                            &mut rotator,
+                            &audio_buffer,
+                        ).await {
+                            if let Some(r) = commit_reply.take() {
+                                let _ = r.send(Err(err));
+                            }
+                            return;
                         }
                     }
                 }
@@ -364,19 +406,22 @@ async fn session_loop(
             msg = conn.ws.next() => {
                 match msg {
                     None => {
-                        // Unexpected close is not a §6 rotatable condition.
+                        let err = CloudError::WebSocket("WebSocket closed unexpectedly".into());
                         if let Some(r) = commit_reply.take() {
-                            let _ = r.send(Err(CloudError::WebSocket(
-                                "WebSocket closed unexpectedly".into(),
-                            )));
+                            let _ = r.send(Err(err));
+                            return;
                         }
-                        return;
+                        last_error = Some(err);
+                        dead = true;
                     }
                     Some(Err(e)) => {
+                        let err = CloudError::WebSocket(e.to_string());
                         if let Some(r) = commit_reply.take() {
-                            let _ = r.send(Err(CloudError::WebSocket(e.to_string())));
+                            let _ = r.send(Err(err));
+                            return;
                         }
-                        return;
+                        last_error = Some(err);
+                        dead = true;
                     }
                     Some(Ok(Message::Text(text))) => {
                         let parsed = match ServerMessage::parse(&text) {
@@ -389,6 +434,25 @@ async fn session_loop(
                                     "STT session started id={:?}",
                                     parsed.session_id
                                 );
+                                if !session_started {
+                                    session_started = true;
+                                    // Flush buffered audio that waited for session_started.
+                                    for chunk in audio_buffer.clone() {
+                                        if let Err(err) = send_audio_or_reconnect(
+                                            &mut conn,
+                                            &chunk,
+                                            false,
+                                            &settings,
+                                            &keyterms,
+                                            &mut rotator,
+                                            &audio_buffer,
+                                        ).await {
+                                            last_error = Some(err);
+                                            dead = true;
+                                            break;
+                                        }
+                                    }
+                                }
                             }
                             "partial_transcript" => {
                                 if let Some(t) = parsed.text {
@@ -400,10 +464,11 @@ async fn session_loop(
                                 let transcript = parsed.text.unwrap_or_default();
                                 if let Some(r) = commit_reply.take() {
                                     let _ = r.send(Ok(transcript));
+                                    let _ = conn.ws.close(None).await;
+                                    return;
                                 }
-                                // Close and exit.
-                                let _ = conn.ws.close(None).await;
-                                return;
+                                // Premature commit — hold until caller commits.
+                                held_transcript = Some(transcript);
                             }
                             other => {
                                 if let Some(kind) = RotatableError::from_message_type(other) {
@@ -428,12 +493,15 @@ async fn session_loop(
                                                 }
                                             }
                                             conn = c;
+                                            session_started = true;
                                         }
                                         Err(err) => {
                                             if let Some(r) = commit_reply.take() {
                                                 let _ = r.send(Err(err));
+                                                return;
                                             }
-                                            return;
+                                            last_error = Some(err);
+                                            dead = true;
                                         }
                                     }
                                 } else if other == "error"
@@ -453,11 +521,13 @@ async fn session_loop(
                                     let err_text = parsed
                                         .error
                                         .unwrap_or_else(|| other.to_string());
+                                    let err = CloudError::msg(err_text);
                                     if let Some(r) = commit_reply.take() {
-                                        let _ = r.send(Err(CloudError::msg(err_text)));
+                                        let _ = r.send(Err(err));
+                                        return;
                                     }
-                                    // Non-rotatable hard error — stop.
-                                    return;
+                                    last_error = Some(err);
+                                    dead = true;
                                 }
                             }
                         }
@@ -472,7 +542,47 @@ async fn session_loop(
     }
 
     if let Some(r) = commit_reply.take() {
-        let _ = r.send(Err(CloudError::SessionClosed));
+        let err = last_error.unwrap_or(CloudError::SessionClosed);
+        let _ = r.send(Err(err));
+    }
+}
+
+async fn send_audio_or_reconnect(
+    conn: &mut Connection,
+    pcm: &[u8],
+    commit: bool,
+    settings: &SttSettings,
+    keyterms: &[String],
+    rotator: &mut KeyRotator,
+    audio_buffer: &[Vec<u8>],
+) -> CloudResult<()> {
+    match send_audio(conn, pcm, commit).await {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            // Any send failure means the socket is dead — try one reconnect + resend.
+            log::warn!("STT send failed, attempting reconnect: {}", e.message);
+            match reconnect_and_resend(
+                settings,
+                keyterms,
+                rotator,
+                audio_buffer,
+                RotatableError::ResourceExhausted,
+                &e.message,
+            )
+            .await
+            {
+                Ok(mut c) => {
+                    if commit {
+                        send_audio(&mut c, &[], true)
+                            .await
+                            .map_err(|e2| CloudError::WebSocket(e2.message))?;
+                    }
+                    *conn = c;
+                    Ok(())
+                }
+                Err(err) => Err(err),
+            }
+        }
     }
 }
 
@@ -485,7 +595,6 @@ struct Connection {
 
 struct SendErr {
     message: String,
-    rotatable: Option<RotatableError>,
 }
 
 async fn send_audio(conn: &mut Connection, pcm: &[u8], commit: bool) -> Result<(), SendErr> {
@@ -495,7 +604,6 @@ async fn send_audio(conn: &mut Connection, pcm: &[u8], commit: bool) -> Result<(
         .await
         .map_err(|e| SendErr {
             message: e.to_string(),
-            rotatable: None,
         })
 }
 
@@ -516,8 +624,11 @@ async fn connect_with_rotation(
                 // try next key
             }
             Err(ConnectErr::Other(e)) => {
-                // Non-auth network/protocol failures do not burn the key list.
-                return Err(CloudError::WebSocket(e));
+                // Transient network/protocol failures: advance and try remaining keys
+                // so a flaky first key does not abort the whole cycle.
+                if rotator.fail_and_advance(format!("connect: {e}")).is_none() {
+                    return Err(rotator.aggregate_error());
+                }
             }
         }
     }
@@ -526,6 +637,24 @@ async fn connect_with_rotation(
 enum ConnectErr {
     Rotatable { status: u16, message: String },
     Other(String),
+}
+
+/// Extract HTTP status codes that trigger key rotation from a tungstenite error string.
+/// Uses word-boundary matching so substrings like "1401" do not false-positive as 401.
+pub fn parse_rotatable_http_status(msg: &str) -> Option<u16> {
+    for code in [401u16, 403, 429] {
+        let needle = code.to_string();
+        if let Some(idx) = msg.find(&needle) {
+            let before_ok = idx == 0
+                || !msg.as_bytes()[idx - 1].is_ascii_digit();
+            let after = idx + needle.len();
+            let after_ok = after >= msg.len() || !msg.as_bytes()[after].is_ascii_digit();
+            if before_ok && after_ok {
+                return Some(code);
+            }
+        }
+    }
+    None
 }
 
 async fn try_connect(
@@ -547,8 +676,10 @@ async fn try_connect(
             })?,
     );
 
-    match connect_async(request).await {
-        Ok((ws, response)) => {
+    let connect_result = tokio::time::timeout(CONNECT_TIMEOUT, connect_async(request)).await;
+    match connect_result {
+        Err(_) => Err(ConnectErr::Other("WebSocket connect timed out".into())),
+        Ok(Ok((ws, response))) => {
             let status = response.status();
             if status == StatusCode::SWITCHING_PROTOCOLS || status.is_success() {
                 Ok(Connection { ws })
@@ -564,16 +695,13 @@ async fn try_connect(
                 }
             }
         }
-        Err(e) => {
-            // tokio-tungstenite surfaces HTTP errors in the error string; detect 401/403/429.
+        Ok(Err(e)) => {
             let msg = e.to_string();
-            for code in [401u16, 403, 429] {
-                if msg.contains(&code.to_string()) {
-                    return Err(ConnectErr::Rotatable {
-                        status: code,
-                        message: msg,
-                    });
-                }
+            if let Some(code) = parse_rotatable_http_status(&msg) {
+                return Err(ConnectErr::Rotatable {
+                    status: code,
+                    message: msg,
+                });
             }
             Err(ConnectErr::Other(msg))
         }
@@ -584,7 +712,7 @@ async fn reconnect_and_resend(
     settings: &SttSettings,
     keyterms: &[String],
     rotator: &mut KeyRotator,
-    audio_buffer: &Arc<Mutex<Vec<Vec<u8>>>>,
+    audio_buffer: &[Vec<u8>],
     _kind: RotatableError,
     err_text: &str,
 ) -> CloudResult<Connection> {
@@ -593,9 +721,8 @@ async fn reconnect_and_resend(
     }
     let mut conn = connect_with_rotation(settings, keyterms, rotator).await?;
     // Resend all buffered audio (uncommitted).
-    let chunks = audio_buffer.lock().await.clone();
-    for chunk in chunks {
-        send_audio(&mut conn, &chunk, false)
+    for chunk in audio_buffer {
+        send_audio(&mut conn, chunk, false)
             .await
             .map_err(|e| CloudError::WebSocket(e.message))?;
     }
@@ -761,5 +888,24 @@ mod tests {
         // Second key "succeeds" — no further advance; transcript would be returned.
         assert_eq!(rotator.current_key(), "good");
         assert_eq!(rotator.tried, 1);
+    }
+
+    #[test]
+    fn parse_rotatable_status_word_boundary() {
+        assert_eq!(parse_rotatable_http_status("HTTP 401 Unauthorized"), Some(401));
+        assert_eq!(parse_rotatable_http_status("status: 403"), Some(403));
+        assert_eq!(parse_rotatable_http_status("rate 429"), Some(429));
+        // Must not false-positive on embedded digits.
+        assert_eq!(parse_rotatable_http_status("request id 1401"), None);
+        assert_eq!(parse_rotatable_http_status("code 4030"), None);
+        assert_eq!(parse_rotatable_http_status("all good"), None);
+    }
+
+    #[test]
+    fn encode_empty_commit_chunk() {
+        let json = encode_audio_chunk(&[], true);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["commit"], true);
+        assert_eq!(v["audio_base_64"], "");
     }
 }

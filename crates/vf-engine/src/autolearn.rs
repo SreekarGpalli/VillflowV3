@@ -62,7 +62,8 @@ fn is_stopword(w: &str) -> bool {
 
 /// Word-align injected vs current; return up to 3 auto-learn candidates.
 ///
-/// Rules: single-token replacements, edit distance 1–3, token length ≥ 4, not stopword.
+/// Rules: single-token substitutions after a greedy align that can skip one
+/// insert/delete, edit distance 1–3, token length ≥ 4, not stopword.
 pub fn find_learn_candidates(injected: &str, current: &str) -> Vec<String> {
     let inj = tokenize(injected);
     let cur = tokenize(current);
@@ -70,29 +71,43 @@ pub fn find_learn_candidates(injected: &str, current: &str) -> Vec<String> {
         return Vec::new();
     }
 
-    // Simple positional alignment on the shorter shared prefix/window.
-    let n = inj.len().min(cur.len());
+    let n = inj.len();
+    let m = cur.len();
     let mut out = Vec::new();
     let mut seen = HashSet::new();
+    let mut i = 0usize;
+    let mut j = 0usize;
 
-    for i in 0..n {
+    while i < n && j < m {
+        if inj[i].eq_ignore_ascii_case(&cur[j]) {
+            i += 1;
+            j += 1;
+            continue;
+        }
+        // Prefer skipping a pure insert/delete when the next token realigns.
+        if i + 1 < n && inj[i + 1].eq_ignore_ascii_case(&cur[j]) {
+            i += 1;
+            continue;
+        }
+        if j + 1 < m && inj[i].eq_ignore_ascii_case(&cur[j + 1]) {
+            j += 1;
+            continue;
+        }
+        // Single-token substitution.
         let a = &inj[i];
-        let b = &cur[i];
-        if a.eq_ignore_ascii_case(b) {
-            continue;
-        }
-        // Single-token replacement: both are single tokens (already are).
+        let b = &cur[j];
         let blen = b.chars().count();
-        if blen < 4 || is_stopword(b) {
-            continue;
-        }
-        let d = edit_distance(&a.to_ascii_lowercase(), &b.to_ascii_lowercase());
-        if (1..=3).contains(&d) && seen.insert(b.to_ascii_lowercase()) {
-            out.push(b.clone());
-            if out.len() >= 3 {
-                break;
+        if blen >= 4 && !is_stopword(b) {
+            let d = edit_distance(&a.to_ascii_lowercase(), &b.to_ascii_lowercase());
+            if (1..=3).contains(&d) && seen.insert(b.to_ascii_lowercase()) {
+                out.push(b.clone());
+                if out.len() >= 3 {
+                    break;
+                }
             }
         }
+        i += 1;
+        j += 1;
     }
     out
 }
@@ -102,11 +117,12 @@ pub fn words_for_bump(final_text: &str) -> Vec<String> {
     tokenize(final_text)
 }
 
-/// Schedule auto-learn: wait ~8s, re-read focused text, add candidates (max 3).
+/// Schedule auto-learn: wait ~8s, re-read the same window's focused text, add candidates (max 3).
 /// Also bumps use_count for dictionary words that appeared in final text.
 pub fn spawn_auto_learn(
     store: Arc<dyn Store>,
     injected_text: String,
+    target_hwnd: isize,
     auto_learn: bool,
     event_tx: tokio::sync::broadcast::Sender<vf_core::EngineEvent>,
 ) {
@@ -122,10 +138,13 @@ pub fn spawn_auto_learn(
 
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(8)).await;
-        let Some(current) = tokio::task::spawn_blocking(context::reread_focused_text)
-            .await
-            .ok()
-            .flatten()
+        let hwnd = target_hwnd;
+        let Some(current) = tokio::task::spawn_blocking(move || {
+            context::reread_text_for_hwnd(if hwnd != 0 { Some(hwnd) } else { None })
+        })
+        .await
+        .ok()
+        .flatten()
         else {
             // Silent no-op if the element can't be re-read.
             return;

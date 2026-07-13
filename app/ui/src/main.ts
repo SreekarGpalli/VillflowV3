@@ -148,12 +148,26 @@ function setupTabs() {
 async function loadSettings() {
   try {
     const settings = await invoke<Settings>("get_settings");
+    // Reconcile launch-at-startup checkbox with actual registry when possible.
+    try {
+      const regOn = await invoke<boolean>("autostart_status");
+      if (settings.general.launch_at_startup !== regOn) {
+        // Prefer the settings file as source of truth and re-sync registry later on save.
+        // Surface registry state if settings say off but registry is on.
+        if (!settings.general.launch_at_startup && regOn) {
+          settings.general.launch_at_startup = true;
+        }
+      }
+    } catch {
+      /* autostart_status optional */
+    }
     savedSettings = JSON.parse(JSON.stringify(settings));
     currentSettings = settings;
     populateForm(settings);
     updateSaveBar();
   } catch (err) {
     console.error("Failed to load settings:", err);
+    showToast(`Failed to load settings: ${err}`, "error");
   }
 }
 
@@ -165,8 +179,9 @@ function populateForm(settings: Settings) {
 
   // Dictation Tab
   const deviceSelect = document.getElementById("dict-audio-device") as HTMLSelectElement;
+  // Option values use system_default; label is "System default".
   let devVal = settings.audio.input_device;
-  if (devVal === "system_default") devVal = "System default";
+  if (devVal === "System default") devVal = "system_default";
   deviceSelect.value = devVal;
   
   const cleanups = document.getElementsByName("dict-cleanup");
@@ -239,6 +254,9 @@ function gatherFormSettings(): Settings {
   const deviceSelect = document.getElementById("dict-audio-device") as HTMLSelectElement;
   const modelSelect = document.getElementById("groq-model") as HTMLSelectElement;
 
+  let inputDevice = deviceSelect.value;
+  if (inputDevice === "System default") inputDevice = "system_default";
+
   return {
     version: 1,
     general: {
@@ -252,7 +270,7 @@ function gatherFormSettings(): Settings {
       scratchpad: (document.getElementById("hk-scratchpad") as HTMLInputElement).value
     },
     audio: {
-      input_device: deviceSelect.value
+      input_device: inputDevice
     },
     stt: {
       api_keys: currentSettings?.stt.api_keys || [],
@@ -297,12 +315,18 @@ function setupSettingsChangeListeners() {
   saveConfirmBtn?.addEventListener("click", async () => {
     if (!currentSettings || !savedSettings) return;
     try {
-      // Autostart registry handler
-      if (currentSettings.general.launch_at_startup !== savedSettings.general.launch_at_startup) {
-        await invoke("set_autostart", { enabled: currentSettings.general.launch_at_startup });
-      }
-      
+      // Persist settings first; then sync registry (refresh path when enabled).
       await invoke("save_settings", { settings: currentSettings });
+      try {
+        await invoke("set_autostart", {
+          enabled: currentSettings.general.launch_at_startup,
+        });
+      } catch (autoErr) {
+        showToast(`Settings saved, but autostart registry failed: ${autoErr}`, "error");
+        savedSettings = JSON.parse(JSON.stringify(currentSettings));
+        updateSaveBar();
+        return;
+      }
       savedSettings = JSON.parse(JSON.stringify(currentSettings));
       updateSaveBar();
       showToast("Settings saved successfully.", "success");
@@ -556,6 +580,7 @@ async function loadDictionary() {
 
   } catch (err) {
     console.error("Failed to load dictionary:", err);
+    showToast(`Failed to load dictionary: ${err}`, "error");
   }
 }
 
@@ -834,6 +859,7 @@ async function loadHistory(append = false) {
 
   } catch (err) {
     console.error("Failed to load history list:", err);
+    showToast(`Failed to load history: ${err}`, "error");
   }
 }
 
@@ -882,6 +908,7 @@ async function loadInsights() {
 
   } catch (err) {
     console.error("Failed to load insights summary:", err);
+    showToast(`Failed to load insights: ${err}`, "error");
   }
 }
 
@@ -898,8 +925,8 @@ function renderHeatmap(dailyWords: [string, number][]) {
 
   const now = new Date();
   
-  // Prepend empty cells to align with the starting day of the week
-  const startDate = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+  // Prepend empty cells to align with the starting day of the week (local).
+  const startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 365);
   const startDay = startDate.getDay();
   for (let s = 0; s < startDay; s++) {
     const cell = document.createElement("div");
@@ -909,10 +936,10 @@ function renderHeatmap(dailyWords: [string, number][]) {
     grid.appendChild(cell);
   }
 
-  // Generate boxes starting from 365 days ago up to today
+  // Generate boxes starting from 365 days ago up to today (local calendar dates).
   for (let i = 365; i >= 0; i--) {
-    const dayDate = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
-    const dayStr = dayDate.toISOString().split("T")[0];
+    const dayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+    const dayStr = localDateStr(dayDate);
     const wordCount = dataMap.get(dayStr) || 0;
 
     const cell = document.createElement("div");
@@ -937,6 +964,14 @@ function renderHeatmap(dailyWords: [string, number][]) {
 }
 
 // --- UTILITIES ---
+
+/** Local calendar date as YYYY-MM-DD (matches store local ts day keys). */
+function localDateStr(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 
 function escapeHtml(unsafe: string): string {
   return unsafe
