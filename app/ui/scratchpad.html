@@ -39,12 +39,12 @@
     .toolbar {
       background: var(--bg-panel);
       border: 1px solid var(--border-color);
-      padding: 6px 12px;
+      padding: 8px 16px;
       display: flex;
-      gap: 8px;
+      gap: 10px;
       align-items: center;
       position: absolute;
-      top: 16px;
+      top: 20px;
       left: 50%;
       transform: translateX(-50%);
       border-radius: 20px;
@@ -87,7 +87,7 @@
     /* Editor Area */
     .editor-container {
       flex: 1;
-      padding: 72px 20px 20px 20px; /* Space for the floating toolbar */
+      padding: 88px 32px 32px 32px; /* Space for the floating toolbar */
       overflow-y: auto;
       background: transparent;
       outline: none;
@@ -97,9 +97,11 @@
     .editor {
       min-height: 100%;
       outline: none;
-      font-size: 15px;
-      line-height: 1.6;
-      color: #e5e7eb;
+      font-size: 16px;
+      line-height: 1.7;
+      color: #e3e3e3;
+      max-width: 800px;
+      margin: 0 auto;
     }
 
     .editor[contenteditable="true"]:empty:before {
@@ -132,7 +134,7 @@
     .status-bar {
       font-size: 11px;
       color: var(--text-muted);
-      padding: 8px 14px;
+      padding: 12px 24px;
       border-top: 1px solid var(--border-color);
       background: rgba(0, 0, 0, 0.2);
       display: flex;

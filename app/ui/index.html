@@ -148,18 +148,18 @@
     /* Content Area */
     .content-container {
       flex: 1;
-      padding: 36px 48px 120px 48px; /* Extra bottom padding so floating save bar doesn't overlap content */
+      padding: 32px 48px 120px 48px;
       overflow-y: auto;
       display: flex;
       flex-direction: column;
-      gap: 28px;
+      gap: 32px;
       position: relative;
     }
 
     .tab-content {
       display: none;
       flex-direction: column;
-      gap: 24px;
+      gap: 32px;
       max-width: 900px;
       animation: fadeIn 0.25s ease-out;
     }
@@ -190,7 +190,7 @@
       background: rgba(22, 24, 40, 0.45);
       border: 1px solid rgba(255, 255, 255, 0.06);
       border-radius: 16px;
-      padding: 24px;
+      padding: 28px;
       backdrop-filter: blur(25px);
       box-shadow: 
         0 4px 24px rgba(0, 0, 0, 0.3),
@@ -198,17 +198,13 @@
         inset 0 -1px 0 rgba(0, 0, 0, 0.2);
       display: flex;
       flex-direction: column;
-      gap: 20px;
+      gap: 24px;
       transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
     }
 
     .card:hover {
-      background: rgba(26, 28, 48, 0.5);
-      border-color: rgba(255, 255, 255, 0.09);
-      box-shadow: 
-        0 8px 32px rgba(0, 0, 0, 0.4),
-        inset 0 1px 0 rgba(255, 255, 255, 0.12),
-        inset 0 -1px 0 rgba(0, 0, 0, 0.2);
+      background: var(--bg-card-hover);
+      border-color: #5f6368;
     }
 
     .card-title {
@@ -220,20 +216,20 @@
       align-items: center;
       gap: 8px;
       border-bottom: 1px solid var(--border-color);
-      padding-bottom: 12px;
-      margin-bottom: 4px;
+      padding-bottom: 16px;
+      margin-bottom: 8px;
     }
 
     /* Form Controls */
     .form-group {
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 6px;
     }
 
     .form-row {
       display: flex;
-      gap: 12px;
+      gap: 16px;
       align-items: stretch;
     }
 
@@ -245,7 +241,7 @@
     .form-row select,
     .form-row button,
     .form-row .btn {
-      height: 42px; /* Set a standard height for aligned controls */
+      height: 40px; /* Set a standard height for aligned controls */
     }
 
     label {
@@ -256,9 +252,9 @@
     }
 
     input[type="text"], input[type="password"], select {
-      background: rgba(0, 0, 0, 0.25);
+      background: transparent;
       border: 1px solid var(--border-color);
-      border-radius: 10px;
+      border-radius: 8px;
       padding: 10px 14px;
       color: var(--text-main);
       font-family: inherit;
@@ -266,15 +262,15 @@
       outline: none;
       transition: all 0.2s ease;
       width: 100%;
-      height: 42px;
+      height: 40px;
     }
 
     textarea {
-      background: rgba(5, 5, 8, 0.4);
+      background: transparent;
       border: 1px solid var(--border-color);
-      border-radius: 10px;
+      border-radius: 8px;
       padding: 14px;
-      color: #e5e7eb;
+      color: #e3e3e3;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
       font-size: 13px;
       line-height: 1.6;
@@ -287,7 +283,7 @@
 
     input[type="text"]:focus, input[type="password"]:focus, select:focus, textarea:focus {
       border-color: var(--accent);
-      box-shadow: 0 0 0 3px var(--accent-glow);
+      box-shadow: 0 0 0 1px var(--accent);
     }
 
     /* Google-style Custom Checkboxes (Material Design 3 Switches) */
@@ -473,7 +469,7 @@
     }
 
     th, td {
-      padding: 12px 16px;
+      padding: 14px 18px;
       border-bottom: 1px solid var(--border-color);
       font-size: 14px;
     }
@@ -498,8 +494,8 @@
     .key-row {
       display: flex;
       align-items: center;
-      gap: 10px;
-      padding: 10px 16px;
+      gap: 16px;
+      padding: 12px 18px;
       background: rgba(0, 0, 0, 0.2);
       border: 1px solid var(--border-color);
       border-radius: 8px;
@@ -589,18 +585,18 @@
     }
 
     .history-body {
-      padding: 20px;
+      padding: 24px;
       background: rgba(0, 0, 0, 0.15);
       border-top: 1px solid var(--border-color);
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 20px;
     }
 
     .transcript-block {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 20px;
+      gap: 24px;
     }
 
     .transcript-label {
@@ -624,14 +620,14 @@
     .stats-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 20px;
+      gap: 24px;
     }
 
     .stat-card {
-      background: rgba(99, 102, 241, 0.05);
-      border: 1px solid rgba(99, 102, 241, 0.1);
+      background: rgba(168, 199, 250, 0.04);
+      border: 1px solid rgba(168, 199, 250, 0.08);
       border-radius: 16px;
-      padding: 24px;
+      padding: 28px;
       display: flex;
       flex-direction: column;
       gap: 6px;
@@ -641,11 +637,8 @@
 
     .stat-value {
       font-size: 36px;
-      font-weight: 800;
-      color: var(--text-main);
-      background: var(--accent-gradient);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
+      font-weight: 700;
+      color: var(--accent);
     }
 
     .stat-label {
@@ -694,16 +687,16 @@
     .heatmap-container {
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 12px;
       overflow-x: auto;
-      padding-bottom: 8px;
+      padding-bottom: 12px;
     }
 
     .heatmap-grid {
       display: grid;
       grid-template-rows: repeat(7, 10px);
       grid-auto-flow: column;
-      grid-gap: 3px;
+      grid-gap: 4px;
       min-width: 720px;
     }
 
@@ -723,10 +716,10 @@
       box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
     }
 
-    .heatmap-cell[data-level="1"] { background-color: #312e81; }
-    .heatmap-cell[data-level="2"] { background-color: #3730a3; }
-    .heatmap-cell[data-level="3"] { background-color: #4f46e5; }
-    .heatmap-cell[data-level="4"] { background-color: #818cf8; }
+    .heatmap-cell[data-level="1"] { background-color: #004a77; }
+    .heatmap-cell[data-level="2"] { background-color: #00639b; }
+    .heatmap-cell[data-level="3"] { background-color: #007ec1; }
+    .heatmap-cell[data-level="4"] { background-color: #a8c7fa; }
 
     .heatmap-legend {
       display: flex;
@@ -797,19 +790,18 @@
     /* Utility */
     .save-bar {
       position: fixed;
-      bottom: 24px;
-      left: 274px; /* sidebar width (250px) + content container margin (24px) */
-      right: 48px;
-      max-width: 852px;
-      background: rgba(15, 17, 28, 0.85);
-      border: 1px solid rgba(99, 102, 241, 0.2);
-      border-radius: 14px;
-      padding: 16px 24px;
+      bottom: 32px;
+      left: 282px; /* sidebar width (250px) + content container margin (32px) */
+      right: 32px;
+      max-width: 850px;
+      background: var(--bg-sidebar);
+      border: 1px solid var(--border-color);
+      border-radius: 28px;
+      padding: 16px 32px;
       display: none;
       align-items: center;
       justify-content: space-between;
-      backdrop-filter: blur(20px);
-      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(99, 102, 241, 0.1);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
       z-index: 90;
       animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
     }
