@@ -18,3 +18,14 @@ findings:
 - [info] groq.rs matches §7: Bearer auth, temperature 0.2, max_completion_tokens 2048, non-streaming, choices[0].message.content trimmed + quote/fence stripping, GET /openai/v1/models → data[].id. API key is never logged (error snippets truncated, key never included).
 - [info] No `// TODO(vf)` markers in P2 source. Only the GrokBuild-owned `vf-cloud` crate (plus Cargo.lock) was touched — crate-ownership §4 respected. All dependencies are within the §3 whitelist (tokio, tokio-tungstenite, futures-util, reqwest, serde, serde_json, thiserror, anyhow, base64, log). No §2 non-goals, no telemetry, no API keys logged.
 fixes applied: none (build, clippy, and tests already clean — nothing to correct within the 30-line budget).
+
+## V3 — 2026-07-13
+build: PASS   clippy: PASS (0 warnings)   tests: PASS (36 tests: 29 vf-cloud + 5 vf-engine + 2 vf-store)
+findings:
+- [info] crates/vf-engine/src/util.rs deliberately avoids `chrono` (not on the §3 whitelist — see V1 finding) by using `windows::GetLocalTime` for the history `ts`. Good: the engine crate stays within the whitelist. (vf-core/vf-store still use `chrono`; that V1 finding stands and is untouched by P3.)
+- [info] §5 implemented: `WH_KEYBOARD_LL` hook with key-up detection + event swallowing (hotkeys.rs); cpal capture resolving the current default input device per utterance, resampled to 16 kHz mono s16le via rubato (audio.rs); UIA context read capped at 1500 chars + Ctrl+C clipboard save/restore selection fallback (context.rs); Win32 layered overlay bottom-center, never takes focus, hidden when Idle (overlay.rs); clipboard-paste / sendinput-typing injection with restore_clipboard (inject.rs). Orchestrator state machine Idle→Recording→Processing→Injecting→Idle with Dictation + Command flows, "Select text first" abort, key rotation via vf-cloud, Groq cleanup (None skips LLM), history append, and auto-learn (orchestrator.rs).
+- [info] §15 implemented: auto-learn waits ~8s, re-reads focused text, word-aligns injected vs current, accepts single-token edits with distance 1–3, token length ≥4, non-stopword, max 3/utterance, plus use_count bump (autolearn.rs). All rules present and unit-tested.
+- [info] Dependency set is within the §3 whitelist (tokio, futures-util, cpal, rubato, arboard, serde, serde_json, thiserror, anyhow, log, dirs, windows, env_logger as dev-dep, vf-store as dev-dep). No extra crates added.
+- [info] Only the GrokBuild-owned `vf-engine` crate (+ Cargo.lock and an example) was touched — §4 ownership respected. No `// TODO(vf)` markers. No §2 non-goals, no telemetry, no API keys logged.
+- [minor/cosmetic] crates/vf-engine/src/overlay.rs:318 has a no-op `let _ = (GetDC, ReleaseDC);` to silence an unused-import warning. Harmless; not a contract issue. Could be removed by dropping the imports, but not necessary.
+fixes applied: none (build, clippy, and tests already clean — nothing to correct within the 30-line budget).
