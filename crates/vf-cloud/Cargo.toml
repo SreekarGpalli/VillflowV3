@@ -4,4 +4,17 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-# GrokBuild owns this crate
+vf-core = { path = "../vf-core" }
+tokio = { version = "1", features = ["rt", "macros", "sync", "time", "net"] }
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+futures-util = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+anyhow = "1.0"
+base64 = "0.22"
+log = "0.4"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros", "sync", "time", "rt-multi-thread"] }
