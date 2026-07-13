@@ -756,24 +756,28 @@ async function loadHistory(append = false) {
             <svg class="chevron-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
           </span>
         </div>
-        <div class="history-body">
-          <div class="transcript-block">
-            <div>
-              <div class="transcript-label">RAW TRANSCRIPT</div>
-              <div class="transcript-box">${escapeHtml(entry.raw_transcript)}</div>
+        <div class="history-body-wrapper">
+          <div class="history-body-inner">
+            <div class="history-body">
+              <div class="transcript-block">
+                <div>
+                  <div class="transcript-label">RAW TRANSCRIPT</div>
+                  <div class="transcript-box">${escapeHtml(entry.raw_transcript)}</div>
+                </div>
+                <div>
+                  <div class="transcript-label">FINAL INJECTED TEXT</div>
+                  <div class="transcript-box">${escapeHtml(entry.final_text)}</div>
+                </div>
+              </div>
+              <div style="display:flex; justify-content: space-between; align-items:center; font-size:12px; color: var(--text-muted); margin-top: 4px;">
+                <div>
+                  <span>Duration: ${(entry.duration_ms / 1000).toFixed(2)}s</span>
+                  <span style="margin: 0 8px; color: var(--border-color);">|</span>
+                  <span>Words: ${entry.word_count}</span>
+                </div>
+                <button class="btn btn-sm copy-history-text" data-text="${escapeHtml(entry.final_text)}">Copy Injected Text</button>
+              </div>
             </div>
-            <div>
-              <div class="transcript-label">FINAL INJECTED TEXT</div>
-              <div class="transcript-box">${escapeHtml(entry.final_text)}</div>
-            </div>
-          </div>
-          <div style="display:flex; justify-content: space-between; align-items:center; font-size:12px; color: var(--text-muted); margin-top: 4px;">
-            <div>
-              <span>Duration: ${(entry.duration_ms / 1000).toFixed(2)}s</span>
-              <span style="margin: 0 8px; color: var(--border-color);">|</span>
-              <span>Words: ${entry.word_count}</span>
-            </div>
-            <button class="btn btn-sm copy-history-text" data-text="${escapeHtml(entry.final_text)}">Copy Injected Text</button>
           </div>
         </div>
       `;
@@ -787,15 +791,13 @@ async function loadHistory(append = false) {
         (header as any).hasListener = true;
         header.addEventListener("click", () => {
           const row = header.closest(".history-row");
-          const body = header.nextElementSibling as HTMLDivElement;
-          const isActive = body.classList.contains("active");
+          if (!row) return;
+          const isExpanded = row.classList.contains("expanded");
           
-          historyContainer.querySelectorAll(".history-body").forEach(b => b.classList.remove("active"));
           historyContainer.querySelectorAll(".history-row").forEach(r => r.classList.remove("expanded"));
 
-          if (!isActive) {
-            body.classList.add("active");
-            row?.classList.add("expanded");
+          if (!isExpanded) {
+            row.classList.add("expanded");
           }
         });
       }
