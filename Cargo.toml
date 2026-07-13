@@ -1,0 +1,9 @@
+[workspace]
+members = [
+    "crates/vf-core",
+    "crates/vf-store",
+    "crates/vf-cloud",
+    "crates/vf-engine",
+    "app/src-tauri",
+]
+resolver = "2"

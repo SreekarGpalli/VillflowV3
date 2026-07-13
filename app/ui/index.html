@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VillFlow</title>
+  <style>
+    :root {
+      --bg-dark: #0a0b10;
+      --bg-card: rgba(20, 22, 35, 0.65);
+      --bg-sidebar: rgba(13, 14, 23, 0.9);
+      --border-color: rgba(255, 255, 255, 0.08);
+      --text-main: #f3f4f6;
+      --text-muted: #9ca3af;
+      --text-disabled: rgba(156, 163, 175, 0.4);
+      --accent: #6366f1;
+      --accent-glow: rgba(99, 102, 241, 0.15);
+      --accent-gradient: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: radial-gradient(circle at 50% 120%, #1e1b4b 0%, var(--bg-dark) 70%);
+      color: var(--text-main);
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+    }
+
+    /* Sidebar Styling */
+    .sidebar {
+      width: 260px;
+      background: var(--bg-sidebar);
+      border-right: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      backdrop-filter: blur(12px);
+    }
+
+    .logo-container {
+      padding: 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .logo-badge {
+      width: 32px;
+      height: 32px;
+      background: var(--accent-gradient);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 16px;
+      color: white;
+      box-shadow: 0 4px 12px var(--accent-glow);
+    }
+
+    .logo-text {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      background: var(--accent-gradient);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .nav-list {
+      list-style: none;
+      padding: 16px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-disabled);
+      cursor: not-allowed;
+      border: 1px solid transparent;
+      transition: all 0.2s ease;
+      position: relative;
+    }
+
+    .nav-item::after {
+      content: "Stub";
+      position: absolute;
+      right: 14px;
+      font-size: 10px;
+      background: rgba(255, 255, 255, 0.05);
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: 1px solid var(--border-color);
+    }
+
+    /* Main Content Styling */
+    .content-area {
+      flex: 1;
+      padding: 40px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    .header-panel {
+      max-width: 800px;
+    }
+
+    .header-panel h1 {
+      font-size: 28px;
+      font-weight: 800;
+      margin-bottom: 8px;
+      letter-spacing: -0.025em;
+    }
+
+    .header-panel p {
+      color: var(--text-muted);
+      font-size: 15px;
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      padding: 24px;
+      max-width: 800px;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    }
+
+    .card-title {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--accent);
+    }
+
+    .pulse {
+      width: 8px;
+      height: 8px;
+      background: #10b981;
+      border-radius: 50%;
+      display: inline-block;
+      animation: pulse-animation 2s infinite;
+    }
+
+    @keyframes pulse-animation {
+      0% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+      }
+      70% {
+        transform: scale(1);
+        box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
+      }
+      100% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+      }
+    }
+
+    pre {
+      background: rgba(0, 0, 0, 0.4);
+      padding: 16px;
+      border-radius: 8px;
+      border: 1px solid var(--border-color);
+      font-family: "Fira Code", Consolas, Monaco, monospace;
+      font-size: 13px;
+      color: #38bdf8;
+      overflow-x: auto;
+      max-height: 350px;
+    }
+
+    .footer {
+      font-size: 12px;
+      color: var(--text-disabled);
+      margin-top: auto;
+      padding: 16px 24px;
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      justify-content: space-between;
+    }
+  </style>
+</head>
+<body>
+  <!-- Sidebar Navigation -->
+  <aside class="sidebar">
+    <div class="logo-container">
+      <div class="logo-badge">V3</div>
+      <div class="logo-text">VillFlow</div>
+    </div>
+    <ul class="nav-list">
+      <li class="nav-item">General</li>
+      <li class="nav-item">Dictation</li>
+      <li class="nav-item">Hotkeys</li>
+      <li class="nav-item">Dictionary</li>
+      <li class="nav-item">AI Services</li>
+      <li class="nav-item">Prompts</li>
+      <li class="nav-item">Output</li>
+      <li class="nav-item">History</li>
+      <li class="nav-item">Insights</li>
+      <li class="nav-item">About</li>
+    </ul>
+    <div class="footer">
+      <span>Version 3.0.0-p1</span>
+      <span>Antigravity</span>
+    </div>
+  </aside>
+
+  <!-- Main View -->
+  <main class="content-area">
+    <div class="header-panel">
+      <h1>Dashboard Shell</h1>
+      <p>Workspace initialized. The frontend left-nav elements are currently disabled stubs for Session 1 (P1).</p>
+    </div>
+
+    <div class="card">
+      <div class="card-title">
+        <span class="pulse"></span>
+        <span>Settings Proof-of-Life (IPC: get_settings)</span>
+      </div>
+      <div id="settings-display">Loading settings from Rust backend...</div>
+    </div>
+  </main>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
