@@ -33,8 +33,23 @@ pub fn inject_text(
 
 /// Public: clear sticky modifiers after an utterance ends (even if inject was skipped).
 pub fn force_release_all_modifiers() {
-    const MODS: [VIRTUAL_KEY; 5] = [VK_CONTROL, VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN];
-    // Send key-ups for every standard modifier. Harmless if already up.
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_RCONTROL, VK_RMENU, VK_RSHIFT,
+    };
+    // Generic + left/right so neither side of a chord can stick.
+    const MODS: [VIRTUAL_KEY; 11] = [
+        VK_CONTROL,
+        VK_LCONTROL,
+        VK_RCONTROL,
+        VK_SHIFT,
+        VK_LSHIFT,
+        VK_RSHIFT,
+        VK_MENU,
+        VK_LMENU,
+        VK_RMENU,
+        VK_LWIN,
+        VK_RWIN,
+    ];
     let ups: Vec<INPUT> = MODS.into_iter().map(|vk| key_input(vk, true)).collect();
     unsafe {
         let _ = SendInput(&ups, std::mem::size_of::<INPUT>() as i32);

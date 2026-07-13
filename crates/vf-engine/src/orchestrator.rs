@@ -75,6 +75,8 @@ impl EngineRuntime {
         log::error!("{msg}");
         self.emit(EngineEvent::Error(msg));
         self.abort_active();
+        // Errors often fire while the user still has Ctrl/Shift half-held from PTT.
+        inject::force_release_all_modifiers();
         overlay::hide(&self.overlay_tx);
         self.set_state(EngineState::Idle);
     }
