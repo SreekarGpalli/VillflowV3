@@ -317,6 +317,7 @@ pub trait Store: Send + Sync {
     fn dictionary_list(&self) -> anyhow::Result<Vec<DictEntry>>;
     fn dictionary_add(&self, word: &str, source: &str) -> anyhow::Result<DictEntry>;
     fn dictionary_delete(&self, id: i64) -> anyhow::Result<()>;
+    fn dictionary_update(&self, id: i64, word: &str) -> anyhow::Result<()>;
     fn dictionary_toggle_star(&self, id: i64) -> anyhow::Result<()>;
     fn dictionary_bump_use_count(&self, words: &[String]) -> anyhow::Result<()>;
 

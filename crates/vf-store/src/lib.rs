@@ -170,6 +170,12 @@ impl Store for SqliteStore {
         Ok(())
     }
 
+    fn dictionary_update(&self, id: i64, word: &str) -> anyhow::Result<()> {
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("DB Mutex poisoned"))?;
+        conn.execute("UPDATE dictionary SET word = ? WHERE id = ?", rusqlite::params![word, id])?;
+        Ok(())
+    }
+
     fn dictionary_toggle_star(&self, id: i64) -> anyhow::Result<()> {
         let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("DB Mutex poisoned"))?;
         conn.execute(
@@ -410,6 +416,11 @@ mod tests {
         store.dictionary_bump_use_count(&["testword".to_string()]).expect("Failed to bump use count");
         let list_bumped = store.dictionary_list().expect("Failed to list dictionary after bump");
         assert_eq!(list_bumped[0].use_count, 1);
+
+        // Test update
+        store.dictionary_update(entry.id, "newword").expect("Failed to update word");
+        let list_updated = store.dictionary_list().expect("Failed to list dictionary after update");
+        assert_eq!(list_updated[0].word, "newword");
 
         store.dictionary_delete(entry.id).expect("Failed to delete word");
         assert!(store.dictionary_list().expect("Failed to list after delete").is_empty());

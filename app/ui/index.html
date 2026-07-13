@@ -3,19 +3,26 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>VillFlow</title>
+  <title>VillFlow Dashboard</title>
   <style>
     :root {
-      --bg-dark: #0a0b10;
-      --bg-card: rgba(20, 22, 35, 0.65);
-      --bg-sidebar: rgba(13, 14, 23, 0.9);
+      --bg-dark: #07080d;
+      --bg-gradient: radial-gradient(circle at 50% 120%, #17153b 0%, #07080d 80%);
+      --bg-sidebar: rgba(12, 13, 22, 0.95);
+      --bg-card: rgba(22, 24, 40, 0.55);
+      --bg-card-hover: rgba(28, 30, 50, 0.7);
       --border-color: rgba(255, 255, 255, 0.08);
+      --border-color-focus: rgba(99, 102, 241, 0.4);
       --text-main: #f3f4f6;
       --text-muted: #9ca3af;
-      --text-disabled: rgba(156, 163, 175, 0.4);
+      --text-disabled: rgba(156, 163, 175, 0.45);
       --accent: #6366f1;
-      --accent-glow: rgba(99, 102, 241, 0.15);
+      --accent-hover: #4f46e5;
       --accent-gradient: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+      --accent-glow: rgba(99, 102, 241, 0.2);
+      --danger: #ef4444;
+      --danger-hover: #dc2626;
+      --success: #10b981;
     }
 
     * {
@@ -26,24 +33,25 @@
 
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background: radial-gradient(circle at 50% 120%, #1e1b4b 0%, var(--bg-dark) 70%);
+      background: var(--bg-gradient);
       color: var(--text-main);
       height: 100vh;
       overflow: hidden;
       display: flex;
     }
 
-    /* Sidebar Styling */
+    /* Layout structure */
     .sidebar {
-      width: 260px;
+      width: 250px;
       background: var(--bg-sidebar);
       border-right: 1px solid var(--border-color);
       display: flex;
       flex-direction: column;
-      backdrop-filter: blur(12px);
+      backdrop-filter: blur(20px);
+      z-index: 10;
     }
 
-    .logo-container {
+    .logo-section {
       padding: 24px;
       display: flex;
       align-items: center;
@@ -52,23 +60,23 @@
     }
 
     .logo-badge {
-      width: 32px;
-      height: 32px;
+      width: 34px;
+      height: 34px;
       background: var(--accent-gradient);
-      border-radius: 8px;
+      border-radius: 10px;
       display: flex;
       align-items: center;
       justify-content: center;
       font-weight: 800;
       font-size: 16px;
       color: white;
-      box-shadow: 0 4px 12px var(--accent-glow);
+      box-shadow: 0 4px 14px var(--accent-glow);
     }
 
-    .logo-text {
-      font-size: 18px;
-      font-weight: 700;
-      letter-spacing: -0.025em;
+    .logo-name {
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
       background: var(--accent-gradient);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
@@ -79,7 +87,7 @@
       padding: 16px 12px;
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      gap: 4px;
       overflow-y: auto;
       flex: 1;
     }
@@ -87,162 +95,951 @@
     .nav-item {
       display: flex;
       align-items: center;
-      gap: 10px;
       padding: 10px 14px;
       border-radius: 8px;
       font-size: 14px;
-      font-weight: 500;
-      color: var(--text-disabled);
-      cursor: not-allowed;
+      font-weight: 550;
+      color: var(--text-muted);
+      cursor: pointer;
       border: 1px solid transparent;
       transition: all 0.2s ease;
-      position: relative;
     }
 
-    .nav-item::after {
-      content: "Stub";
-      position: absolute;
-      right: 14px;
-      font-size: 10px;
-      background: rgba(255, 255, 255, 0.05);
-      padding: 2px 6px;
-      border-radius: 4px;
-      border: 1px solid var(--border-color);
+    .nav-item:hover {
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text-main);
     }
 
-    /* Main Content Styling */
-    .content-area {
-      flex: 1;
-      padding: 40px;
-      overflow-y: auto;
-      display: flex;
-      flex-direction: column;
-      gap: 24px;
+    .nav-item.active {
+      background: rgba(99, 102, 241, 0.1);
+      border-color: rgba(99, 102, 241, 0.15);
+      color: var(--text-main);
+      box-shadow: inset 0 0 8px rgba(99, 102, 241, 0.05);
     }
 
-    .header-panel {
-      max-width: 800px;
-    }
-
-    .header-panel h1 {
-      font-size: 28px;
-      font-weight: 800;
-      margin-bottom: 8px;
-      letter-spacing: -0.025em;
-    }
-
-    .header-panel p {
-      color: var(--text-muted);
-      font-size: 15px;
-    }
-
-    .card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-color);
-      border-radius: 16px;
-      padding: 24px;
-      max-width: 800px;
-      backdrop-filter: blur(8px);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-    }
-
-    .card-title {
-      font-size: 16px;
-      font-weight: 600;
-      margin-bottom: 16px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      color: var(--accent);
-    }
-
-    .pulse {
-      width: 8px;
-      height: 8px;
-      background: #10b981;
-      border-radius: 50%;
-      display: inline-block;
-      animation: pulse-animation 2s infinite;
-    }
-
-    @keyframes pulse-animation {
-      0% {
-        transform: scale(0.95);
-        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
-      }
-      70% {
-        transform: scale(1);
-        box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
-      }
-      100% {
-        transform: scale(0.95);
-        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
-      }
-    }
-
-    pre {
-      background: rgba(0, 0, 0, 0.4);
-      padding: 16px;
-      border-radius: 8px;
-      border: 1px solid var(--border-color);
-      font-family: "Fira Code", Consolas, Monaco, monospace;
-      font-size: 13px;
-      color: #38bdf8;
-      overflow-x: auto;
-      max-height: 350px;
-    }
-
-    .footer {
-      font-size: 12px;
+    .sidebar-footer {
+      font-size: 11px;
       color: var(--text-disabled);
-      margin-top: auto;
       padding: 16px 24px;
       border-top: 1px solid var(--border-color);
       display: flex;
       justify-content: space-between;
     }
+
+    /* Content Area */
+    .content-container {
+      flex: 1;
+      padding: 36px 48px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    .tab-content {
+      display: none;
+      flex-direction: column;
+      gap: 24px;
+      max-width: 900px;
+      animation: fadeIn 0.25s ease-out;
+    }
+
+    .tab-content.active {
+      display: flex;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .page-header h1 {
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      margin-bottom: 6px;
+    }
+
+    .page-header p {
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    /* Cards */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      padding: 24px;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .card-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid var(--border-color);
+      padding-bottom: 12px;
+      margin-bottom: 4px;
+    }
+
+    /* Form Controls */
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .form-row {
+      display: flex;
+      gap: 16px;
+    }
+
+    .form-row .form-group {
+      flex: 1;
+    }
+
+    label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+
+    input[type="text"], input[type="password"], select, textarea {
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 10px 14px;
+      color: var(--text-main);
+      font-family: inherit;
+      font-size: 14px;
+      outline: none;
+      transition: all 0.2s ease;
+      width: 100%;
+    }
+
+    input[type="text"]:focus, input[type="password"]:focus, select:focus, textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+
+    input[type="checkbox"], input[type="radio"] {
+      width: 16px;
+      height: 16px;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    .checkbox-label {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    .checkbox-label p {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    /* Buttons */
+    .btn {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-color);
+      color: var(--text-main);
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .btn:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.15);
+    }
+
+    .btn:active {
+      transform: scale(0.98);
+    }
+
+    .btn-primary {
+      background: var(--accent-gradient);
+      border: none;
+      color: white;
+      box-shadow: 0 4px 12px var(--accent-glow);
+    }
+
+    .btn-primary:hover {
+      background: linear-gradient(135deg, #5355df 0%, #9545e6 100%);
+      box-shadow: 0 4px 16px rgba(99, 102, 241, 0.3);
+    }
+
+    .btn-danger {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.25);
+      color: #fca5a5;
+    }
+
+    .btn-danger:hover {
+      background: var(--danger);
+      border-color: var(--danger);
+      color: white;
+    }
+
+    .btn-sm {
+      padding: 6px 12px;
+      font-size: 12px;
+      border-radius: 6px;
+    }
+
+    /* Table styling */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+    }
+
+    th, td {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-color);
+      font-size: 14px;
+    }
+
+    th {
+      font-weight: 600;
+      color: var(--text-muted);
+      background: rgba(0, 0, 0, 0.15);
+    }
+
+    tr:hover td {
+      background: rgba(255, 255, 255, 0.01);
+    }
+
+    /* Key List (ElevenLabs API Keys) */
+    .key-list-container {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .key-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 16px;
+      background: rgba(0, 0, 0, 0.2);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+    }
+
+    .key-index {
+      font-weight: 700;
+      color: var(--text-disabled);
+      width: 20px;
+    }
+
+    .key-value {
+      font-family: monospace;
+      flex: 1;
+      font-size: 13px;
+      letter-spacing: 0.5px;
+    }
+
+    .key-actions {
+      display: flex;
+      gap: 6px;
+    }
+
+    /* History List */
+    .history-row {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      margin-bottom: 10px;
+      overflow: hidden;
+      transition: all 0.2s ease;
+    }
+
+    .history-row:hover {
+      background: var(--bg-card-hover);
+      border-color: rgba(255, 255, 255, 0.15);
+    }
+
+    .history-header {
+      padding: 14px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+    }
+
+    .history-meta {
+      display: flex;
+      gap: 16px;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .history-meta .app-badge {
+      background: rgba(99, 102, 241, 0.15);
+      color: #a5b4fc;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 11px;
+    }
+
+    .history-summary {
+      flex: 1;
+      margin-left: 24px;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 450px;
+    }
+
+    .history-body {
+      display: none;
+      padding: 20px;
+      background: rgba(0, 0, 0, 0.15);
+      border-top: 1px solid var(--border-color);
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .history-body.active {
+      display: flex;
+    }
+
+    .transcript-block {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    .transcript-label {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+
+    .transcript-box {
+      background: rgba(0, 0, 0, 0.3);
+      padding: 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border-color);
+      font-size: 13px;
+      line-height: 1.5;
+      min-height: 60px;
+    }
+
+    /* Insights Stats */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    .stat-card {
+      background: rgba(99, 102, 241, 0.05);
+      border: 1px solid rgba(99, 102, 241, 0.1);
+      border-radius: 16px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      align-items: center;
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 36px;
+      font-weight: 800;
+      color: var(--text-main);
+      background: var(--accent-gradient);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .stat-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .top-apps-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .app-progress-item {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .app-progress-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .app-progress-bar {
+      height: 8px;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .app-progress-fill {
+      height: 100%;
+      background: var(--accent-gradient);
+      width: 0%;
+      border-radius: 4px;
+      transition: width 0.5s ease-out;
+    }
+
+    /* Heatmap styling */
+    .heatmap-container {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 8px;
+    }
+
+    .heatmap-grid {
+      display: grid;
+      grid-template-rows: repeat(7, 10px);
+      grid-auto-flow: column;
+      grid-gap: 3px;
+      min-width: 720px;
+    }
+
+    .heatmap-cell {
+      width: 10px;
+      height: 10px;
+      background-color: rgba(255, 255, 255, 0.05);
+      border-radius: 1px;
+      cursor: pointer;
+      position: relative;
+    }
+
+    .heatmap-cell[data-level="1"] { background-color: #312e81; }
+    .heatmap-cell[data-level="2"] { background-color: #3730a3; }
+    .heatmap-cell[data-level="3"] { background-color: #4f46e5; }
+    .heatmap-cell[data-level="4"] { background-color: #818cf8; }
+
+    .heatmap-legend {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    .heatmap-legend-box {
+      width: 10px;
+      height: 10px;
+      border-radius: 1px;
+    }
+
+    /* Modal dialogs */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(4px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+
+    .modal-overlay.active {
+      display: flex;
+    }
+
+    .modal-card {
+      background: #0f111a;
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      padding: 24px;
+      width: 400px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+
+    /* Utility */
+    .save-bar {
+      margin-top: auto;
+      background: rgba(12, 13, 22, 0.95);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 16px 24px;
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.2);
+      max-width: 900px;
+    }
+
+    .save-bar.active {
+      display: flex;
+    }
+
+    .save-bar-text {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
   </style>
 </head>
 <body>
-  <!-- Sidebar Navigation -->
+  <!-- Sidebar -->
   <aside class="sidebar">
-    <div class="logo-container">
+    <div class="logo-section">
       <div class="logo-badge">V3</div>
-      <div class="logo-text">VillFlow</div>
+      <div class="logo-name">VillFlow</div>
     </div>
     <ul class="nav-list">
-      <li class="nav-item">General</li>
-      <li class="nav-item">Dictation</li>
-      <li class="nav-item">Hotkeys</li>
-      <li class="nav-item">Dictionary</li>
-      <li class="nav-item">AI Services</li>
-      <li class="nav-item">Prompts</li>
-      <li class="nav-item">Output</li>
-      <li class="nav-item">History</li>
-      <li class="nav-item">Insights</li>
-      <li class="nav-item">About</li>
+      <li class="nav-item active" data-tab="general">General</li>
+      <li class="nav-item" data-tab="dictation">Dictation</li>
+      <li class="nav-item" data-tab="hotkeys">Hotkeys</li>
+      <li class="nav-item" data-tab="dictionary">Dictionary</li>
+      <li class="nav-item" data-tab="ai-services">AI Services</li>
+      <li class="nav-item" data-tab="prompts">Prompts</li>
+      <li class="nav-item" data-tab="output">Output</li>
+      <li class="nav-item" data-tab="history">History</li>
+      <li class="nav-item" data-tab="insights">Insights</li>
+      <li class="nav-item" data-tab="about">About</li>
     </ul>
-    <div class="footer">
-      <span>Version 3.0.0-p1</span>
+    <div class="sidebar-footer">
+      <span>Version 3.0.0-p4</span>
       <span>Antigravity</span>
     </div>
   </aside>
 
-  <!-- Main View -->
-  <main class="content-area">
-    <div class="header-panel">
-      <h1>Dashboard Shell</h1>
-      <p>Workspace initialized. The frontend left-nav elements are currently disabled stubs for Session 1 (P1).</p>
+  <!-- Content Container -->
+  <main class="content-container">
+    
+    <!-- Tab 1: General -->
+    <div class="tab-content active" id="tab-general">
+      <div class="page-header">
+        <h1>General Settings</h1>
+        <p>Configure startup behavior, tray residency, and system notifications.</p>
+      </div>
+      <div class="card">
+        <div class="card-title">Startup & Behavior</div>
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="gen-launch-at-startup">
+            <div>
+              <span>Launch at Windows startup</span>
+              <p>Automatically launch VillFlow when your system turns on.</p>
+            </div>
+          </label>
+        </div>
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="gen-start-minimized">
+            <div>
+              <span>Start minimized in System Tray</span>
+              <p>Launch the application hidden to the tray, ready in background.</p>
+            </div>
+          </label>
+        </div>
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="gen-show-notifications">
+            <div>
+              <span>Show error notifications</span>
+              <p>Display Windows desktop notifications if API or recording errors occur.</p>
+            </div>
+          </label>
+        </div>
+      </div>
     </div>
 
-    <div class="card">
-      <div class="card-title">
-        <span class="pulse"></span>
-        <span>Settings Proof-of-Life (IPC: get_settings)</span>
+    <!-- Tab 2: Dictation -->
+    <div class="tab-content" id="tab-dictation">
+      <div class="page-header">
+        <h1>Dictation Options</h1>
+        <p>Manage audio capture hardware and dictation cleanup levels.</p>
       </div>
-      <div id="settings-display">Loading settings from Rust backend...</div>
+      <div class="card">
+        <div class="card-title">Audio Hardware</div>
+        <div class="form-group">
+          <label for="dict-audio-device">Active Microphone</label>
+          <select id="dict-audio-device">
+            <option value="system_default">System default</option>
+          </select>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Auto Cleanup Level</div>
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="radio" name="dict-cleanup" value="none">
+            <div>
+              <span>None (Raw Transcript)</span>
+              <p>Bypasses LLM cleanup. Paste transcription raw and unedited.</p>
+            </div>
+          </label>
+        </div>
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="radio" name="dict-cleanup" value="light">
+            <div>
+              <span>Light</span>
+              <p>Remove filler words, fix capitalization and basic punctuation.</p>
+            </div>
+          </label>
+        </div>
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="radio" name="dict-cleanup" value="medium">
+            <div>
+              <span>Medium (Recommended)</span>
+              <p>Light cleanup plus grammar corrections, sentence splits, and list formatting.</p>
+            </div>
+          </label>
+        </div>
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="radio" name="dict-cleanup" value="high">
+            <div>
+              <span>High</span>
+              <p>Medium cleanup plus word tightening for improved conciseness.</p>
+            </div>
+          </label>
+        </div>
+      </div>
     </div>
+
+    <!-- Tab 3: Hotkeys -->
+    <div class="tab-content" id="tab-hotkeys">
+      <div class="page-header">
+        <h1>System Hotkeys</h1>
+        <p>Swallow keyboard inputs to trigger dictation and helper states globally.</p>
+      </div>
+      <div class="card">
+        <div class="card-title">Global Shortcuts</div>
+        <div class="form-group">
+          <label for="hk-dictation">Voice Dictation (Push-to-Talk)</label>
+          <input type="text" id="hk-dictation" readonly placeholder="Press shortcut keys...">
+        </div>
+        <div class="form-group">
+          <label for="hk-command">Command Mode (Selection Transformer)</label>
+          <input type="text" id="hk-command" readonly placeholder="Press shortcut keys...">
+        </div>
+        <div class="form-group">
+          <label for="hk-scratchpad">Toggle Scratchpad Window</label>
+          <input type="text" id="hk-scratchpad" readonly placeholder="Press shortcut keys...">
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 4: Dictionary -->
+    <div class="tab-content" id="tab-dictionary">
+      <div class="page-header">
+        <h1>Spelling Dictionary</h1>
+        <p>Provide special custom words, names, or acronyms to guide spelling bias.</p>
+      </div>
+      <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; margin-bottom: 4px;">
+          <div class="card-title" style="border: none; margin-bottom: 0; padding-bottom: 0;">Custom Words</div>
+          <button class="btn btn-primary btn-sm" id="dict-add-btn">+ Add Word</button>
+        </div>
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="dict-auto-learn">
+            <div>
+              <span>Enable Auto-Learn watcher</span>
+              <p>Automatically detect and learn spellings by tracking post-dictation keystroke updates.</p>
+            </div>
+          </label>
+        </div>
+        <div style="overflow-x: auto;">
+          <table id="dict-table">
+            <thead>
+              <tr>
+                <th>Word</th>
+                <th>Source</th>
+                <th>Weight (Uses)</th>
+                <th>Star (Priority)</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="dict-table-body">
+              <!-- Dictionary entries injected here -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 5: AI Services -->
+    <div class="tab-content" id="tab-ai-services">
+      <div class="page-header">
+        <h1>AI Services & Keys</h1>
+        <p>Manage external cloud API keys for Speech-to-Text and Cleanup LLM.</p>
+      </div>
+      <div class="card">
+        <div class="card-title">ElevenLabs Realtime STT</div>
+        <div class="form-group">
+          <label>API Key Hierarchy (Rotation fallback)</label>
+          <div class="key-list-container" id="el-keys-list">
+            <!-- Key rows injected here -->
+          </div>
+          <div class="form-row" style="margin-top: 8px;">
+            <input type="text" id="el-new-key" placeholder="Enter ElevenLabs API Key...">
+            <button class="btn btn-primary" id="el-add-key-btn">Add Key</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="el-endpoint">STT WebSocket Host</label>
+          <select id="el-endpoint">
+            <option value="wss://api.elevenlabs.io">United States (wss://api.elevenlabs.io)</option>
+            <option value="wss://api.in.residency.elevenlabs.io">India (wss://api.in.residency.elevenlabs.io)</option>
+          </select>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Groq LLM Client</div>
+        <div class="form-group">
+          <label for="groq-key">Groq API Key</label>
+          <input type="password" id="groq-key" placeholder="gsk_...">
+        </div>
+        <div class="form-group">
+          <label for="groq-model">Cleanup Model</label>
+          <div class="form-row">
+            <select id="groq-model">
+              <option value="openai/gpt-oss-120b">openai/gpt-oss-120b (default)</option>
+            </select>
+            <button class="btn" id="groq-refresh-btn" title="Refresh Live Model List">&#8635; Refresh</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 6: Prompts -->
+    <div class="tab-content" id="tab-prompts">
+      <div class="page-header">
+        <h1>Default Prompts</h1>
+        <p>Edit custom system prompt guidelines resolved during cleanup calls.</p>
+      </div>
+      
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div class="card-title" style="border:none; margin:0; padding:0;">Light Prompt Editor</div>
+          <button class="btn btn-sm" data-reset-prompt="light">Reset to Default</button>
+        </div>
+        <textarea id="prompt-light-text" rows="5"></textarea>
+      </div>
+      
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div class="card-title" style="border:none; margin:0; padding:0;">Medium Prompt Editor</div>
+          <button class="btn btn-sm" data-reset-prompt="medium">Reset to Default</button>
+        </div>
+        <textarea id="prompt-medium-text" rows="5"></textarea>
+      </div>
+      
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div class="card-title" style="border:none; margin:0; padding:0;">High Prompt Editor</div>
+          <button class="btn btn-sm" data-reset-prompt="high">Reset to Default</button>
+        </div>
+        <textarea id="prompt-high-text" rows="5"></textarea>
+      </div>
+      
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div class="card-title" style="border:none; margin:0; padding:0;">Command Prompt Editor</div>
+          <button class="btn btn-sm" data-reset-prompt="command">Reset to Default</button>
+        </div>
+        <textarea id="prompt-command-text" rows="5"></textarea>
+      </div>
+    </div>
+
+    <!-- Tab 7: Output -->
+    <div class="tab-content" id="tab-output">
+      <div class="page-header">
+        <h1>Output Injection</h1>
+        <p>Define settings to insert final texts back into active desktop fields.</p>
+      </div>
+      <div class="card">
+        <div class="card-title">Injection Method</div>
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="radio" name="out-method" value="clipboard_paste">
+            <div>
+              <span>Clipboard Paste (Fastest)</span>
+              <p>Inserts via clipboard copy/paste sequence. Restores active clipboard on complete.</p>
+            </div>
+          </label>
+        </div>
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="radio" name="out-method" value="sendinput_typing">
+            <div>
+              <span>Simulated Typing (Safe)</span>
+              <p>Simulates keystrokes per character. Use if target app prevents pasting.</p>
+            </div>
+          </label>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Clipboard Settings</div>
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="out-restore-clipboard">
+            <div>
+              <span>Restore clipboard contents</span>
+              <p>Re-injects the original user clipboard contents back into active system buffer post-paste.</p>
+            </div>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 8: History -->
+    <div class="tab-content" id="tab-history">
+      <div class="page-header">
+        <h1>Dictation History</h1>
+        <p>Inspect raw speech transcripts and final injected outputs.</p>
+      </div>
+      <div id="history-container">
+        <!-- History entries will be generated here -->
+      </div>
+    </div>
+
+    <!-- Tab 9: Insights -->
+    <div class="tab-content" id="tab-insights">
+      <div class="page-header">
+        <h1>Insights & Activity</h1>
+        <p>Visual statistics indicating dictation usage and overall typing rate.</p>
+      </div>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value" id="insight-total-words">0</div>
+          <div class="stat-label">Total Words Dictated</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="insight-avg-wpm">0.0</div>
+          <div class="stat-label">Average WPM</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Top 5 Target Apps</div>
+        <div class="top-apps-list" id="insight-top-apps">
+          <!-- Top apps lists inject here -->
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Activity Streak (365 Days)</div>
+        <div class="heatmap-container">
+          <div class="heatmap-grid" id="heatmap-grid">
+            <!-- Heatmap grid elements injected here -->
+          </div>
+          <div class="heatmap-legend">
+            <span>Less</span>
+            <div class="heatmap-legend-box" style="background-color: rgba(255,255,255,0.05)"></div>
+            <div class="heatmap-legend-box" style="background-color: #312e81"></div>
+            <div class="heatmap-legend-box" style="background-color: #3730a3"></div>
+            <div class="heatmap-legend-box" style="background-color: #4f46e5"></div>
+            <div class="heatmap-legend-box" style="background-color: #818cf8"></div>
+            <span>More</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 10: About -->
+    <div class="tab-content" id="tab-about">
+      <div class="page-header">
+        <h1>About VillFlow</h1>
+        <p>Product information and license credits.</p>
+      </div>
+      <div class="card" style="align-items: center; text-align: center; gap: 16px; padding: 40px 24px;">
+        <div class="logo-badge" style="width:60px; height:60px; font-size:28px; border-radius:18px;">V3</div>
+        <h2 style="font-size:24px; font-weight:800;">VillFlow Dictation</h2>
+        <p style="color:var(--text-muted); font-size:14px; max-width: 500px;">
+          Windows push-to-talk voice dictation application, designed for instant, high-quality, local-cloud integrated transcriptions.
+        </p>
+        <div style="font-size: 13px; color:var(--text-disabled); display: flex; flex-direction:column; gap:4px; margin: 12px 0;">
+          <span>Version 3.0.0 (MSVC Build)</span>
+          <span>© 2026 VillFlow Team. All Rights Reserved.</span>
+        </div>
+        <div style="display:flex; gap:16px;">
+          <a href="https://elevenlabs.io/docs/api-reference/speech-to-text/v-1-speech-to-text-realtime" target="_blank" style="color:var(--accent); font-size:13px; font-weight:600; text-decoration:none;">ElevenLabs API Docs</a>
+          <span style="color:var(--border-color);">|</span>
+          <a href="https://console.groq.com/docs" target="_blank" style="color:var(--accent); font-size:13px; font-weight:600; text-decoration:none;">Groq API Console</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Floating Save Settings Bar -->
+    <div class="save-bar" id="save-bar">
+      <div class="save-bar-text">You have unsaved configuration changes.</div>
+      <div style="display: flex; gap: 8px;">
+        <button class="btn btn-sm" id="save-discard-btn">Discard</button>
+        <button class="btn btn-primary btn-sm" id="save-confirm-btn">Save Changes</button>
+      </div>
+    </div>
+
   </main>
+
+  <!-- Add/Edit Word Modal -->
+  <div class="modal-overlay" id="word-modal">
+    <div class="modal-card">
+      <h3 style="font-size:18px; font-weight:700;" id="word-modal-title">Add Custom Word</h3>
+      <div class="form-group">
+        <label for="word-modal-input">Spelling / Term (Max 20 chars)</label>
+        <input type="text" id="word-modal-input" placeholder="e.g. Sreekar">
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-sm" id="word-modal-cancel">Cancel</button>
+        <button class="btn btn-primary btn-sm" id="word-modal-save">Add</button>
+      </div>
+    </div>
+  </div>
 
   <script type="module" src="/src/main.ts"></script>
 </body>

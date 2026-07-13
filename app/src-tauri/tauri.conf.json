@@ -12,11 +12,22 @@
     "windows": [
       {
         "title": "VillFlow",
-        "width": 800,
-        "height": 600,
+        "width": 900,
+        "height": 700,
         "resizable": true,
         "fullscreen": false,
         "label": "main"
+      },
+      {
+        "title": "Scratchpad",
+        "width": 450,
+        "height": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "alwaysOnTop": true,
+        "visible": false,
+        "label": "scratchpad",
+        "url": "scratchpad.html"
       }
     ],
     "security": {
