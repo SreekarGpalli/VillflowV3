@@ -41,3 +41,15 @@ findings:
 - [minor] `autostart_status` IPC command is defined and registered but not invoked by the frontend (the UI derives the "launch at startup" checkbox from `settings.json`, and `set_autostart` is called on save). Not a contract violation — the command exists and is usable — but it is currently dead from the UI's perspective.
 - [info] `npm run build` in app/ui succeeds (vite build, dist emitted). No `// TODO(vf)` markers elsewhere. No §2 non-goals, no telemetry, no API keys logged (list_groq_models reads the key but never returns or logs it).
 fixes applied: none (build, clippy, tests, and npm build all clean — nothing to correct within the 30-line budget).
+
+## V5 — 2026-07-13
+build: PASS   clippy: PASS (0 warnings)   tests: PASS (36 tests)   npm run build (app/ui): PASS   cargo build --release --workspace: PASS
+findings:
+- [info] Engine host integrated (§5/§13): `vf_engine::spawn` is called at startup, the `EngineHandle` is managed as Tauri state, and `save_settings` now builds `EngineCmd::ApplySettings(Box::new(settings))` and sends it to the engine. This resolves the V4 `// TODO(vf)` stub (no remaining `// TODO(vf)` markers in source).
+- [info] Tray (§14): menu = Open VillFlow / Scratchpad / Quit; V3 icon (icons/32x32.png); tooltip reflects engine state (Idle/Recording/Processing/Injecting); left-click shows the main window. CloseRequested is intercepted to hide-to-tray (app keeps running). `start_minimized` honored. All match §14.
+- [info] Notifications (§5): `tauri-plugin-notification` (within the §3 whitelist) drives `EngineEvent::Error` → tray tooltip + Windows notification when `general.show_error_notifications` is true. capabilities/default.json grants `core:default` + `notification:default` (covers frontend event listening).
+- [info] Autostart: `set_autostart`/`autostart_status` persist/read HKCU `…\Run` value `VillFlow` = exe path (wired in P4, exercised here).
+- [info] Only the Antigravity-owned `app` crate was touched (main.rs, Cargo.toml, capabilities). Dependencies added (`tauri-plugin-notification`, `vf-engine`, tauri features `tray-icon`/`image-png`) are within the §3 whitelist.
+- [minor] §13 lists `scratchpad-toggle` as a shell→frontend event. The bridge consumes `EngineEvent::ToggleScratchpad` internally (toggling the scratchpad Tauri window directly) and does NOT emit a `scratchpad-toggle` event to the frontend. `engine-state` and `engine-error` are emitted. Reasonable since the scratchpad is a shell-owned window, but the named frontend event is not forwarded — report-only.
+- [info] No §2 non-goals, no telemetry, no API keys logged (notification body uses the error message only; settings/keys never logged).
+fixes applied: 1 line — clippy `clone_on_copy` warning at app/src-tauri/src/main.rs:265 (`state.clone()` → `state`, since `EngineState` is `Copy`). This satisfies the §16 rule 2 "clippy should be clean" requirement and is within the 30-line budget.

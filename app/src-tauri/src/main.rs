@@ -262,7 +262,7 @@ fn main() {
                 while let Ok(event) = rx.recv().await {
                     match event {
                         EngineEvent::State(state) => {
-                            let _ = app_handle.emit("engine-state", state.clone());
+                            let _ = app_handle.emit("engine-state", state);
                             if let Some(tray) = app_handle.tray_by_id("main_tray") {
                                 let tooltip = match state {
                                     vf_core::EngineState::Idle => "VillFlow - Idle",
