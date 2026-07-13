@@ -4,4 +4,39 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-# GrokBuild owns this crate
+vf-core = { path = "../vf-core" }
+vf-cloud = { path = "../vf-cloud" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net"] }
+futures-util = "0.3"
+cpal = "0.15"
+rubato = "0.15"
+arboard = "3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+anyhow = "1.0"
+log = "0.4"
+dirs = "5.0"
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Com",
+    "Win32_System_LibraryLoader",
+    "Win32_System_ProcessStatus",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_System_WindowsProgramming",
+    "Win32_UI_Accessibility",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Controls",
+] }
+
+[dev-dependencies]
+vf-store = { path = "../vf-store" }
+env_logger = "0.11"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+
+[[example]]
+name = "headless"
+path = "examples/headless.rs"
