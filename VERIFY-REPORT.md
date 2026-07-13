@@ -71,6 +71,15 @@ open observations (report-only, not fixed):
 - [minor] Tauri CLI warns the identifier `com.villflow.app` ends in `.app` (conflicts with macOS bundle extension). Irrelevant for Windows; revisit before any Mac build.
 - [minor] `npm audit`: 2 advisories (1 moderate, 1 high) in the vite 5.x dev-dependency tree; dev-time only, consider bumping vite later.
 
+## Product drift — command mode without selection (2026-07-13)
+
+CONTRACTS §5 / §18 still say Command Mode requires a selection and aborts with
+"Select text first" when none is present. Product behavior (user request) now
+allows no-selection command mode: spoken instruction generates new content at
+the cursor (`PROMPT_COMMAND_GENERATE` / history `mode=command_generate`).
+With a selection, behavior remains transform-and-replace (`mode=command`).
+Do not "fix" code back to the old contract without updating CONTRACTS.
+
 ## V7 — 2026-07-13 (full audit fix pass)
 
 build: PASS   clippy: PASS (`--all-targets -D warnings`)   tests: PASS (44: 32 vf-cloud + 3 vf-core + 7 vf-engine + 2 vf-store)   npm run build: PASS

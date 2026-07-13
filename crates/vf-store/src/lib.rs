@@ -1,7 +1,9 @@
 use std::path::{Path, PathBuf};
 use std::fs;
 use rusqlite::OptionalExtension;
-use vf_core::{DictEntry, HistoryEntry, InsightsSummary, Settings, Store};
+use vf_core::{
+    migrate_settings, DictEntry, HistoryEntry, InsightsSummary, Settings, Store,
+};
 
 // --- SETTINGS LOAD / SAVE ---
 
@@ -28,9 +30,16 @@ pub fn load_settings(path: &Path) -> anyhow::Result<Settings> {
         return Ok(settings);
     }
 
-    // Missing fields on load -> filled from defaults via serde default attributes, then re-saved.
+    // Missing fields on load -> filled from defaults via serde default attributes,
+    // then migrate schema/prompts if needed, then re-saved.
     match serde_json::from_str::<Settings>(&content) {
         Ok(settings) => {
+            let (settings, migrated) = migrate_settings(settings);
+            // Always re-save so defaults filled by serde are persisted; migrate may
+            // also have replaced legacy stock prompts.
+            if migrated {
+                log::info!("settings migrated to schema v{}", settings.version);
+            }
             save_settings(&settings, path)?;
             Ok(settings)
         }
@@ -458,7 +467,7 @@ mod tests {
 
         // Test 1: Load from non-existent file creates default settings
         let mut settings = load_settings(&temp_path).expect("Failed to load settings");
-        assert_eq!(settings.version, 1);
+        assert_eq!(settings.version, vf_core::SETTINGS_SCHEMA_VERSION);
         assert!(!settings.general.start_minimized);
         assert_eq!(settings.llm.cleanup_level, CleanupLevel::Medium);
         assert!(temp_path.exists());
@@ -484,9 +493,27 @@ mod tests {
         let _ = std::fs::remove_file(&temp_path);
         std::fs::write(&temp_path, "{not valid json").expect("write corrupt");
         let recovered = load_settings(&temp_path).expect("recover from corrupt");
-        assert_eq!(recovered.version, 1);
+        assert_eq!(recovered.version, vf_core::SETTINGS_SCHEMA_VERSION);
         assert!(temp_path.with_extension("json.corrupt").exists()
             || path_has_corrupt_backup(&temp_path));
+
+        // Test 5: Legacy stock prompts migrate to hardened defaults on load
+        let _ = std::fs::remove_file(&temp_path);
+        let legacy = r#"{
+          "version": 1,
+          "prompts": {
+            "light": "You clean up raw speech-to-text dictation from an Indian English speaker. Output ONLY the cleaned text — no preamble, no quotes, no explanation. Remove filler words (uh, um, like, you know, actually when meaningless). Fix punctuation and capitalization. Do not change, add, or reorder any other words. Prefer these spellings when the words occur: {dictionary}. The text will be inserted into {app_name}. Existing text before the cursor is shown for continuity — continue from it naturally and never repeat it: {field_context}",
+            "medium": "custom keep me",
+            "command": "You apply a spoken editing instruction to a piece of text. Output ONLY the transformed text — no preamble, no quotes, no explanation. Preserve the original formatting style (line breaks, lists) unless the instruction says otherwise. The text lives in {app_name}. Apply the INSTRUCTION to the TEXT that follows."
+          }
+        }"#;
+        std::fs::write(&temp_path, legacy).expect("write legacy");
+        let migrated = load_settings(&temp_path).expect("migrate legacy");
+        assert_eq!(migrated.version, vf_core::SETTINGS_SCHEMA_VERSION);
+        assert_eq!(migrated.prompts.light, vf_core::PROMPT_LIGHT);
+        assert_eq!(migrated.prompts.medium, "custom keep me");
+        assert_eq!(migrated.prompts.command, vf_core::PROMPT_COMMAND);
+        assert!(!migrated.prompts.command_generate.is_empty());
 
         // Clean up
         let _ = std::fs::remove_file(&temp_path);

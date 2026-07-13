@@ -133,7 +133,66 @@ pub enum EngineCmd {
 
 // --- SETTINGS DEFAULT HELPERS ---
 
-fn default_version() -> u32 { 1 }
+/// Current settings schema version. Bump when on-disk migration is required.
+pub const SETTINGS_SCHEMA_VERSION: u32 = 2;
+
+fn default_version() -> u32 { SETTINGS_SCHEMA_VERSION }
+
+// Pre-v2 stock prompts (CONTRACTS v1 / original ship). Used only to detect
+// "user still has the factory text" so we can upgrade to hardened prompts
+// without clobbering intentional customizations.
+const LEGACY_PROMPT_LIGHT: &str = "\
+You clean up raw speech-to-text dictation from an Indian English speaker. Output ONLY the cleaned text — no preamble, no quotes, no explanation. Remove filler words (uh, um, like, you know, actually when meaningless). Fix punctuation and capitalization. Do not change, add, or reorder any other words. Prefer these spellings when the words occur: {dictionary}. The text will be inserted into {app_name}. Existing text before the cursor is shown for continuity — continue from it naturally and never repeat it: {field_context}\
+";
+const LEGACY_PROMPT_MEDIUM: &str = "\
+You clean up raw speech-to-text dictation from an Indian English speaker. Output ONLY the cleaned text — no preamble, no quotes, no explanation. Remove filler words (uh, um, like, you know). Fix grammar, punctuation, and capitalization. Split run-on sentences. If the speaker dictates a list, format it as a bulleted or numbered list. Keep the speaker's meaning and vocabulary — do not add content or embellish. Prefer these spellings when the words occur: {dictionary}. The text will be inserted into {app_name} — match a tone appropriate to that app. Existing text before the cursor is shown for continuity — continue from it naturally and never repeat it: {field_context}\
+";
+const LEGACY_PROMPT_HIGH: &str = "\
+You clean up raw speech-to-text dictation from an Indian English speaker. Output ONLY the cleaned text — no preamble, no quotes, no explanation. Remove filler words. Fix grammar, punctuation, and capitalization. Split run-on sentences. Format spoken lists as bulleted or numbered lists. Tighten the wording for clarity and concision, but preserve the speaker's meaning and intent exactly — never add new information. Prefer these spellings when the words occur: {dictionary}. The text will be inserted into {app_name} — match a tone appropriate to that app. Existing text before the cursor is shown for continuity — continue from it naturally and never repeat it: {field_context}\
+";
+const LEGACY_PROMPT_COMMAND: &str = "\
+You apply a spoken editing instruction to a piece of text. Output ONLY the transformed text — no preamble, no quotes, no explanation. Preserve the original formatting style (line breaks, lists) unless the instruction says otherwise. The text lives in {app_name}. Apply the INSTRUCTION to the TEXT that follows.\
+";
+
+/// Upgrade on-disk settings to the current schema.
+///
+/// - Bumps `version` to [`SETTINGS_SCHEMA_VERSION`].
+/// - Replaces prompt fields that still equal the pre-v2 factory text with the
+///   hardened defaults (user-edited prompts are left alone).
+/// - Fills a missing/empty `command_generate` prompt.
+///
+/// Returns `(settings, changed)` so callers can re-save only when needed.
+pub fn migrate_settings(mut s: Settings) -> (Settings, bool) {
+    let mut changed = false;
+
+    if s.version < SETTINGS_SCHEMA_VERSION {
+        s.version = SETTINGS_SCHEMA_VERSION;
+        changed = true;
+    }
+
+    if s.prompts.light.trim() == LEGACY_PROMPT_LIGHT.trim() {
+        s.prompts.light = PROMPT_LIGHT.to_string();
+        changed = true;
+    }
+    if s.prompts.medium.trim() == LEGACY_PROMPT_MEDIUM.trim() {
+        s.prompts.medium = PROMPT_MEDIUM.to_string();
+        changed = true;
+    }
+    if s.prompts.high.trim() == LEGACY_PROMPT_HIGH.trim() {
+        s.prompts.high = PROMPT_HIGH.to_string();
+        changed = true;
+    }
+    if s.prompts.command.trim() == LEGACY_PROMPT_COMMAND.trim() {
+        s.prompts.command = PROMPT_COMMAND.to_string();
+        changed = true;
+    }
+    if s.prompts.command_generate.trim().is_empty() {
+        s.prompts.command_generate = PROMPT_COMMAND_GENERATE.to_string();
+        changed = true;
+    }
+
+    (s, changed)
+}
 fn default_true() -> bool { true }
 fn default_false() -> bool { false }
 fn default_dictation_hotkey() -> String { "Ctrl+Shift+Z".to_string() }
@@ -442,7 +501,7 @@ mod tests {
     #[test]
     fn default_settings_match_contract() {
         let s = default_settings();
-        assert_eq!(s.version, 1);
+        assert_eq!(s.version, SETTINGS_SCHEMA_VERSION);
         assert_eq!(s.hotkeys.dictation, "Ctrl+Shift+Z");
         assert_eq!(s.audio.input_device, "system_default");
         assert_eq!(s.llm.model, "openai/gpt-oss-120b");
@@ -453,5 +512,33 @@ mod tests {
         assert_eq!(s.prompts.command, PROMPT_COMMAND);
         assert_eq!(s.prompts.command_generate, PROMPT_COMMAND_GENERATE);
         assert!(s.prompts.command_generate.contains("no text selected"));
+    }
+
+    #[test]
+    fn migrate_upgrades_legacy_prompts_only() {
+        let mut s = Settings {
+            version: 1,
+            ..Settings::default()
+        };
+        s.prompts.light = LEGACY_PROMPT_LIGHT.to_string();
+        s.prompts.medium = "my custom medium".into();
+        s.prompts.command = LEGACY_PROMPT_COMMAND.to_string();
+        s.prompts.command_generate = String::new();
+
+        let (m, changed) = migrate_settings(s);
+        assert!(changed);
+        assert_eq!(m.version, SETTINGS_SCHEMA_VERSION);
+        assert_eq!(m.prompts.light, PROMPT_LIGHT);
+        assert_eq!(m.prompts.medium, "my custom medium"); // preserved
+        assert_eq!(m.prompts.command, PROMPT_COMMAND);
+        assert_eq!(m.prompts.command_generate, PROMPT_COMMAND_GENERATE);
+    }
+
+    #[test]
+    fn migrate_noop_when_current() {
+        let s = Settings::default();
+        let (m, changed) = migrate_settings(s.clone());
+        assert!(!changed);
+        assert_eq!(m, s);
     }
 }

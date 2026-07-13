@@ -273,7 +273,8 @@ function gatherFormSettings(): Settings {
   if (inputDevice === "System default") inputDevice = "system_default";
 
   return {
-    version: 1,
+    // Keep schema version from loaded settings (engine migrates to current).
+    version: currentSettings?.version ?? savedSettings?.version ?? 2,
     general: {
       launch_at_startup: (document.getElementById("gen-launch-at-startup") as HTMLInputElement).checked,
       start_minimized: (document.getElementById("gen-start-minimized") as HTMLInputElement).checked,

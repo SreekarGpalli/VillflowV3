@@ -31,6 +31,11 @@ struct EngineRuntime {
     overlay_tx: mpsc::UnboundedSender<OverlayCmd>,
     state: EngineState,
     active: Option<ActiveUtterance>,
+    /// Set when key-up arrives while `begin_utterance` is still opening STT.
+    /// Finished as soon as the active utterance is ready.
+    pending_finish: bool,
+    /// Mode being started (used with `pending_finish` before `active` exists).
+    pending_mode: Option<UtteranceMode>,
 }
 
 struct ActiveUtterance {
@@ -46,7 +51,10 @@ struct ActiveUtterance {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum UtteranceMode {
     Dictation,
-    Command,
+    /// Transform selected text.
+    CommandEdit,
+    /// Generate new content (no selection).
+    CommandGenerate,
 }
 
 impl EngineRuntime {
@@ -60,6 +68,8 @@ impl EngineRuntime {
     }
 
     fn abort_active(&mut self) {
+        self.pending_finish = false;
+        self.pending_mode = None;
         if let Some(mut active) = self.active.take() {
             if let Some(c) = active.capture.take() {
                 c.stop();
@@ -79,6 +89,17 @@ impl EngineRuntime {
         inject::force_release_all_modifiers();
         overlay::hide(&self.overlay_tx);
         self.set_state(EngineState::Idle);
+    }
+
+    fn request_finish_if_matching(&mut self, mode: UtteranceMode) -> bool {
+        if matches!(self.active.as_ref().map(|a| a.mode), Some(m) if m == mode) {
+            return true; // caller should finish_utterance
+        }
+        // Key released while still opening STT/capture for this mode.
+        if self.pending_mode == Some(mode) && self.active.is_none() {
+            self.pending_finish = true;
+        }
+        false
     }
 }
 
@@ -111,6 +132,8 @@ pub async fn run(
         overlay_tx,
         state: EngineState::Idle,
         active: None,
+        pending_finish: false,
+        pending_mode: None,
     };
     rt.emit(EngineEvent::State(EngineState::Idle));
 
@@ -151,10 +174,7 @@ pub async fn run(
                         }
                     }
                     Some(HotkeyEvent::Up(HotkeyId::Dictation)) => {
-                        if matches!(
-                            rt.active.as_ref().map(|a| a.mode),
-                            Some(UtteranceMode::Dictation)
-                        ) {
+                        if rt.request_finish_if_matching(UtteranceMode::Dictation) {
                             finish_utterance(&mut rt).await;
                         }
                     }
@@ -170,18 +190,31 @@ pub async fn run(
                             .ok()
                             .flatten()
                             .filter(|s| !s.trim().is_empty());
-                            begin_utterance(&mut rt, UtteranceMode::Command).await;
+                            let mode = if selection.is_some() {
+                                UtteranceMode::CommandEdit
+                            } else {
+                                UtteranceMode::CommandGenerate
+                            };
+                            begin_utterance(&mut rt, mode).await;
                             if let Some(active) = rt.active.as_mut() {
                                 active.context.selection = selection;
                             }
                         }
                     }
                     Some(HotkeyEvent::Up(HotkeyId::CommandMode)) => {
-                        if matches!(
+                        // Finish either edit or generate command utterances.
+                        let should = matches!(
                             rt.active.as_ref().map(|a| a.mode),
-                            Some(UtteranceMode::Command)
-                        ) {
+                            Some(UtteranceMode::CommandEdit | UtteranceMode::CommandGenerate)
+                        );
+                        if should {
                             finish_utterance(&mut rt).await;
+                        } else if matches!(
+                            rt.pending_mode,
+                            Some(UtteranceMode::CommandEdit | UtteranceMode::CommandGenerate)
+                        ) && rt.active.is_none()
+                        {
+                            rt.pending_finish = true;
                         }
                     }
                 }
@@ -193,6 +226,8 @@ pub async fn run(
 async fn begin_utterance(rt: &mut EngineRuntime, mode: UtteranceMode) {
     // Clock from key-down (start of begin), not after STT open — §5 duration_ms.
     let started = Instant::now();
+    rt.pending_mode = Some(mode);
+    rt.pending_finish = false;
     rt.set_state(EngineState::Recording);
     overlay::show_recording(&rt.overlay_tx, 0.0);
 
@@ -251,6 +286,13 @@ async fn begin_utterance(rt: &mut EngineRuntime, mode: UtteranceMode) {
         capture,
         feed_task: Some(feed_task),
     });
+    rt.pending_mode = None;
+
+    // Key-up arrived while STT/capture was still starting — finish immediately.
+    if rt.pending_finish {
+        rt.pending_finish = false;
+        finish_utterance(rt).await;
+    }
 }
 
 async fn finish_utterance(rt: &mut EngineRuntime) {
@@ -297,8 +339,29 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
     }
 
     let mode = active.mode;
-    let ctx = active.context;
+    let mut ctx = active.context;
     let started = active.started;
+
+    // For command-edit: refresh selection just before the LLM so we transform
+    // what is currently selected if the user adjusted it mid-hold.
+    if mode == UtteranceMode::CommandEdit {
+        let fresh = tokio::task::spawn_blocking(context::read_selection_with_fallback)
+            .await
+            .ok()
+            .flatten()
+            .filter(|s| !s.trim().is_empty());
+        if let Some(sel) = fresh {
+            ctx.selection = Some(sel);
+        } else if ctx
+            .selection
+            .as_ref()
+            .map(|s| s.trim().is_empty())
+            .unwrap_or(true)
+        {
+            // Nothing selected anymore — fall through as generate instead of failing.
+            log::info!("command-edit lost selection; treating as generate");
+        }
+    }
 
     let final_text = match mode {
         UtteranceMode::Dictation => {
@@ -384,30 +447,29 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
                 }
             }
         }
-        UtteranceMode::Command => {
+        UtteranceMode::CommandEdit | UtteranceMode::CommandGenerate => {
             let dict_words = dictionary_words_ordered(&rt.store);
             let prompt_ctx = PromptContext {
                 app_name: ctx.app_name.clone(),
                 field_context: tail_chars(&ctx.field_context, FIELD_CONTEXT_MAX_CHARS),
                 dictionary: dict_words,
             };
-            // With a selection: transform it (result replaces the selection).
-            // Without: generate new content from the spoken instruction.
             let selection = ctx
                 .selection
                 .clone()
                 .filter(|s| !s.trim().is_empty());
-            let msgs = match &selection {
-                Some(sel) => build_command(
+            // Edit only when we started as edit *and* still have selection text.
+            let msgs = match (mode, &selection) {
+                (UtteranceMode::CommandEdit, Some(sel)) => build_command(
                     &rt.settings.prompts,
                     &prompt_ctx,
-                    &raw_transcript, // spoken instruction
+                    &raw_transcript,
                     sel,
                 ),
-                None => build_command_generate(
+                _ => build_command_generate(
                     &rt.settings.prompts,
                     &prompt_ctx,
-                    &raw_transcript, // spoken instruction
+                    &raw_transcript,
                 ),
             };
             match chat_completion(
@@ -426,6 +488,29 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
             }
         }
     };
+
+    // Command-edit: if selection is gone at inject time, warn but still insert.
+    let had_edit_selection = mode == UtteranceMode::CommandEdit
+        && ctx
+            .selection
+            .as_ref()
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false);
+    if had_edit_selection {
+        let still = tokio::task::spawn_blocking(context::read_selection_with_fallback)
+            .await
+            .ok()
+            .flatten()
+            .filter(|s| !s.trim().is_empty());
+        if still.is_none() {
+            overlay::show_toast(
+                &rt.overlay_tx,
+                "Selection lost — inserting at cursor",
+            );
+            // Brief pause so the toast is readable; inject proceeds.
+            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        }
+    }
 
     rt.set_state(EngineState::Injecting);
 
@@ -455,7 +540,20 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
 
     let history_mode = match mode {
         UtteranceMode::Dictation => "dictation",
-        UtteranceMode::Command => "command",
+        UtteranceMode::CommandEdit => {
+            // If we fell back to generate (no selection for LLM), label accordingly.
+            if ctx
+                .selection
+                .as_ref()
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false)
+            {
+                "command"
+            } else {
+                "command_generate"
+            }
+        }
+        UtteranceMode::CommandGenerate => "command_generate",
     };
     let entry = HistoryEntry {
         id: None,
