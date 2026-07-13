@@ -71,6 +71,16 @@ open observations (report-only, not fixed):
 - [minor] Tauri CLI warns the identifier `com.villflow.app` ends in `.app` (conflicts with macOS bundle extension). Irrelevant for Windows; revisit before any Mac build.
 - [minor] `npm audit`: 2 advisories (1 moderate, 1 high) in the vite 5.x dev-dependency tree; dev-time only, consider bumping vite later.
 
+## V8 — 2026-07-13 (remaining-issue fix + reverify)
+
+build: PASS (tauri production)   clippy: PASS   tests: PASS (55)   npm build: PASS
+fixed:
+- settings schema v2 + `migrate_settings`: legacy stock prompts auto-upgraded on load (custom prompts preserved); `command_generate` filled if empty
+- PTT key-up race: `pending_finish` finishes utterance after STT open if release came early
+- command-edit re-reads selection before LLM; toast if selection lost at inject; history `command` vs `command_generate`
+- UI version aligned to 0.1.0; UI no longer forces settings.version back to 1 on save
+- contract drift documented below (CONTRACTS.md not edited per §16)
+
 ## Product drift — command mode without selection (2026-07-13)
 
 CONTRACTS §5 / §18 still say Command Mode requires a selection and aborts with
