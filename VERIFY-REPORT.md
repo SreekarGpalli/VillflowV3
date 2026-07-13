@@ -53,3 +53,20 @@ findings:
 - [minor] §13 lists `scratchpad-toggle` as a shell→frontend event. The bridge consumes `EngineEvent::ToggleScratchpad` internally (toggling the scratchpad Tauri window directly) and does NOT emit a `scratchpad-toggle` event to the frontend. `engine-state` and `engine-error` are emitted. Reasonable since the scratchpad is a shell-owned window, but the named frontend event is not forwarded — report-only.
 - [info] No §2 non-goals, no telemetry, no API keys logged (notification body uses the error message only; settings/keys never logged).
 fixes applied: 1 line — clippy `clone_on_copy` warning at app/src-tauri/src/main.rs:265 (`state.clone()` → `state`, since `EngineState` is `Copy`). This satisfies the §16 rule 2 "clippy should be clean" requirement and is within the 30-line budget.
+
+## V6 — 2026-07-13 (orchestrator, post-V5 launch failure + live validation)
+symptom: launching villflow.exe showed the WebView error page "localhost refused to connect (ERR_CONNECTION_REFUSED)".
+root cause: the app was compiled with plain `cargo build --release`, which does NOT enable Tauri's production asset embedding — the window loads `build.devUrl` (http://localhost:5173) unless the app is built through the Tauri CLI (`tauri build`), which enables the production feature and embeds `frontendDist`. V5 verified the cargo build compiled but never launched the exe, so this passed silently.
+fixes applied:
+- app/src-tauri/tauri.conf.json: `beforeDevCommand` = `npm run dev` and `beforeBuildCommand` = `npm run build` (cwd ../ui), so CLI dev/build flows are self-contained.
+- app/ui/package.json: added `@tauri-apps/cli` ^2 as devDependency (no cargo-tauri subcommand was installed on this machine).
+- canonical production build is now: `ui\node_modules\.bin\tauri.cmd build --no-bundle` run from `app\` (documented in README.md). Verified: exe now renders the full UI (all 10 sections) from embedded assets.
+- crates/vf-cloud/examples/live_smoke.rs: new live smoke test (reads real keys from %APPDATA%\VillFlow\settings.json).
+live validation results (real keys, 2026-07-13):
+- Groq: 17 models listed in 159ms; default model `openai/gpt-oss-120b` present; chat completion round-trip 311ms.
+- ElevenLabs realtime: session opened, partial transcripts streamed live, committed final transcript 258ms after last chunk — empirically confirms the §6 wire schema pinned in P2 (message_type / audio_base_64 / commit / partial_transcript / committed_transcript).
+- Engine: spawns at app startup; VillFlowOverlayClass window present and hidden at Idle, per §5.
+open observations (report-only, not fixed):
+- [minor] About page shows "Version 3.0.0 (MSVC Build)" / footer "3.0.0-p4" while tauri.conf.json says 0.1.0 — cosmetic version drift invented by the UI, not from spec.
+- [minor] Tauri CLI warns the identifier `com.villflow.app` ends in `.app` (conflicts with macOS bundle extension). Irrelevant for Windows; revisit before any Mac build.
+- [minor] `npm audit`: 2 advisories (1 moderate, 1 high) in the vite 5.x dev-dependency tree; dev-time only, consider bumping vite later.

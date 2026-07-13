@@ -17,4 +17,4 @@ winreg = "0.52"
 tauri-plugin-notification = "2"
 
 [build-dependencies]
-tauri-build = { version = "2" }
+tauri-build = { version = "2", features = [] }
