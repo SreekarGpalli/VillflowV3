@@ -93,6 +93,16 @@ fn history_list(limit: u32, offset: u32, store: State<'_, Arc<SqliteStore>>) -> 
 }
 
 #[tauri::command]
+fn history_delete(id: i64, store: State<'_, Arc<SqliteStore>>) -> Result<(), String> {
+    store.history_delete(id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn history_clear(store: State<'_, Arc<SqliteStore>>) -> Result<(), String> {
+    store.history_clear().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn insights_summary(store: State<'_, Arc<SqliteStore>>) -> Result<InsightsSummary, String> {
     store.insights_summary().map_err(|e| e.to_string())
 }
@@ -114,6 +124,7 @@ fn reset_prompt(name: String) -> Result<String, String> {
         "medium" => Ok(vf_core::PROMPT_MEDIUM.to_string()),
         "high" => Ok(vf_core::PROMPT_HIGH.to_string()),
         "command" => Ok(vf_core::PROMPT_COMMAND.to_string()),
+        "command_generate" => Ok(vf_core::PROMPT_COMMAND_GENERATE.to_string()),
         _ => Err(format!("Unknown prompt name: {name}")),
     }
 }
@@ -332,6 +343,8 @@ fn main() {
             dictionary_delete,
             dictionary_toggle_star,
             history_list,
+            history_delete,
+            history_clear,
             insights_summary,
             scratchpad_get,
             scratchpad_set,

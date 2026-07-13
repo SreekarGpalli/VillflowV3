@@ -1,6 +1,8 @@
 //! Global hotkeys via `WH_KEYBOARD_LL` — CONTRACTS §5.
 //!
-//! Push-to-talk needs key-up; events for matched combos are swallowed.
+//! Push-to-talk needs key-up. Only the combo's MAIN key (Z/X/C) is ever
+//! swallowed; modifier downs/ups always pass through to the OS so modifier
+//! state can never get stuck for other apps.
 //!
 //! Shared hook state is held in a replaceable `Mutex<Option<Arc<…>>>` (not
 //! `OnceLock`) so a second engine spawn / test run can re-bind the event
@@ -396,21 +398,22 @@ unsafe extern "system" fn low_level_proc(code: i32, wparam: WPARAM, lparam: LPAR
                 HotkeyId::Scratchpad => &combos.scratchpad,
             };
             if combo_involves(combo, vk) {
-                swallow = true;
                 engaged.remove(&id);
                 let _ = event_tx.send(HotkeyEvent::Up(id));
-            }
-        }
-        // Swallow key-ups that belong to a combo only when modifiers still match
-        // that combo (never bare main-key ups — that would eat Z/X/C system-wide).
-        for combo in [&combos.dictation, &combos.command_mode, &combos.scratchpad] {
-            if combo_involves(combo, vk) && combo.matches_modifiers(ctrl, shift, alt, win) {
-                swallow = true;
+                // Swallow only the MAIN key's release. Modifier releases must
+                // always reach the OS — eating a Shift/Ctrl key-up leaves that
+                // modifier logically stuck down for every other app (mouse
+                // clicks behave like Shift+click until the user re-taps it).
+                if combo.key_vk == vk {
+                    swallow = true;
+                }
             }
         }
     }
 
-    // While a combo is engaged, swallow all of its constituent keys.
+    // While a combo is engaged, keep swallowing its MAIN key (key-repeat and
+    // stray downs after a modifier was released mid-hold). Modifier events are
+    // never swallowed.
     {
         let engaged = shared.engaged.lock().unwrap();
         for id in engaged.iter() {
@@ -419,7 +422,7 @@ unsafe extern "system" fn low_level_proc(code: i32, wparam: WPARAM, lparam: LPAR
                 HotkeyId::CommandMode => &combos.command_mode,
                 HotkeyId::Scratchpad => &combos.scratchpad,
             };
-            if combo_involves(combo, vk) {
+            if combo.key_vk == vk {
                 swallow = true;
             }
         }

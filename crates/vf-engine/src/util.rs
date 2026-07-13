@@ -16,3 +16,12 @@ pub fn local_iso8601() -> String {
 pub fn word_count(text: &str) -> u32 {
     text.split_whitespace().filter(|w| !w.is_empty()).count() as u32
 }
+
+/// Last `max` characters of `text` (char-boundary safe).
+pub fn tail_chars(text: &str, max: usize) -> String {
+    let count = text.chars().count();
+    if count <= max {
+        return text.to_string();
+    }
+    text.chars().skip(count - max).collect()
+}

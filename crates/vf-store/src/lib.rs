@@ -337,6 +337,18 @@ impl Store for SqliteStore {
         Ok(list)
     }
 
+    fn history_delete(&self, id: i64) -> anyhow::Result<()> {
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("DB Mutex poisoned"))?;
+        conn.execute("DELETE FROM history WHERE id = ?", rusqlite::params![id])?;
+        Ok(())
+    }
+
+    fn history_clear(&self) -> anyhow::Result<()> {
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("DB Mutex poisoned"))?;
+        conn.execute("DELETE FROM history", [])?;
+        Ok(())
+    }
+
     fn scratchpad_get(&self) -> anyhow::Result<String> {
         let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("DB Mutex poisoned"))?;
         let content: Option<String> = conn.query_row(
@@ -595,6 +607,13 @@ mod tests {
         assert_eq!(insights.daily_words.len(), 2);
         assert_eq!(insights.daily_words[0], (yesterday, 1));
         assert_eq!(insights.daily_words[1], (today, 3));
+
+        // 4. History delete + clear
+        let first_id = store.history_list(10, 0).unwrap()[0].id.unwrap();
+        store.history_delete(first_id).expect("Failed to delete history row");
+        assert_eq!(store.history_list(10, 0).unwrap().len(), 2);
+        store.history_clear().expect("Failed to clear history");
+        assert!(store.history_list(10, 0).unwrap().is_empty());
     }
 
     /// Local calendar date as `YYYY-MM-DD`, offset by whole days from today.

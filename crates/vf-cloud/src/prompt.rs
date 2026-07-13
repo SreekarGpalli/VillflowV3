@@ -83,7 +83,7 @@ pub fn build_dictation(
     })
 }
 
-/// Build command-mode (system, user) messages.
+/// Build command-mode (system, user) messages for transforming a selection.
 ///
 /// System = resolved PROMPT_COMMAND (all placeholders).
 /// User = `INSTRUCTION:\n{instruction}\n\nTEXT:\n{selection}` with empty → `(none)`.
@@ -99,6 +99,21 @@ pub fn build_command(
         resolve_placeholder(instruction),
         resolve_placeholder(selection)
     );
+    ChatMessages { system, user }
+}
+
+/// Build command-mode (system, user) messages for generating new content
+/// (no selection): the spoken instruction produces text inserted at the cursor.
+///
+/// System = resolved PROMPT_COMMAND_GENERATE (all placeholders).
+/// User = `INSTRUCTION:\n{instruction}` with empty → `(none)`.
+pub fn build_command_generate(
+    prompts: &PromptsSettings,
+    ctx: &PromptContext,
+    instruction: &str,
+) -> ChatMessages {
+    let system = apply_placeholders(&prompts.command_generate, ctx, instruction, "");
+    let user = format!("INSTRUCTION:\n{}", resolve_placeholder(instruction));
     ChatMessages { system, user }
 }
 
@@ -230,5 +245,34 @@ mod tests {
         let high = build_dictation(CleanupLevel::High, &prompts, &ctx, "t").unwrap();
         assert_eq!(med.system, "MED x");
         assert_eq!(high.system, "HIGH x");
+    }
+
+    #[test]
+    fn command_generate_shape() {
+        let mut prompts = default_prompts();
+        prompts.command_generate = "GEN {app_name}".into();
+        let ctx = PromptContext {
+            app_name: "Outlook".into(),
+            ..PromptContext::default()
+        };
+        let msgs = build_command_generate(&prompts, &ctx, "write a short email");
+        assert_eq!(msgs.system, "GEN Outlook");
+        assert_eq!(msgs.user, "INSTRUCTION:\nwrite a short email");
+        assert!(!msgs.user.contains("TEXT:"));
+    }
+
+    #[test]
+    fn dictation_prompts_forbid_document_rewrite() {
+        let prompts = default_prompts();
+        let ctx = PromptContext {
+            app_name: "notepad.exe".into(),
+            field_context: "already here".into(),
+            dictionary: vec![],
+        };
+        let msgs = build_dictation(CleanupLevel::Medium, &prompts, &ctx, "hello").unwrap();
+        assert!(msgs.system.contains("[DOCUMENT CONTEXT START]"));
+        assert!(msgs.system.contains("already here"));
+        assert!(msgs.system.contains("Never repeat"));
+        assert_eq!(msgs.user, "hello");
     }
 }

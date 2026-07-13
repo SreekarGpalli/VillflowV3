@@ -34,6 +34,7 @@ interface Settings {
     medium: string;
     high: string;
     command: string;
+    command_generate: string;
   };
   output: {
     injection_method: string;
@@ -111,6 +112,19 @@ async function init() {
   loadMoreBtn?.addEventListener("click", () => {
     historyOffset += historyLimit;
     loadHistory(true);
+  });
+
+  // Wire up Clear All history button
+  const clearAllBtn = document.getElementById("history-clear-all-btn");
+  clearAllBtn?.addEventListener("click", async () => {
+    if (!confirm("Delete ALL history entries? This cannot be undone.")) return;
+    try {
+      await invoke("history_clear");
+      await loadHistory();
+      showToast("History cleared.", "success");
+    } catch (err) {
+      showToast(`Failed to clear history: ${err}`, "error");
+    }
   });
 }
 
@@ -226,6 +240,7 @@ function populateForm(settings: Settings) {
   (document.getElementById("prompt-medium-text") as HTMLTextAreaElement).value = settings.prompts.medium;
   (document.getElementById("prompt-high-text") as HTMLTextAreaElement).value = settings.prompts.high;
   (document.getElementById("prompt-command-text") as HTMLTextAreaElement).value = settings.prompts.command;
+  (document.getElementById("prompt-command_generate-text") as HTMLTextAreaElement).value = settings.prompts.command_generate;
 
   // Output Tab
   const methods = document.getElementsByName("out-method");
@@ -287,7 +302,8 @@ function gatherFormSettings(): Settings {
       light: (document.getElementById("prompt-light-text") as HTMLTextAreaElement).value,
       medium: (document.getElementById("prompt-medium-text") as HTMLTextAreaElement).value,
       high: (document.getElementById("prompt-high-text") as HTMLTextAreaElement).value,
-      command: (document.getElementById("prompt-command-text") as HTMLTextAreaElement).value
+      command: (document.getElementById("prompt-command-text") as HTMLTextAreaElement).value,
+      command_generate: (document.getElementById("prompt-command_generate-text") as HTMLTextAreaElement).value
     },
     output: {
       injection_method,
@@ -584,7 +600,7 @@ async function loadDictionary() {
   }
 }
 
-// --- ELEVENLABS ORDERED API KEY HIERARCHY ---
+// --- ELEVENLABS KEYS ---
 
 const elKeysList = document.getElementById("el-keys-list");
 const elNewKeyInput = document.getElementById("el-new-key") as HTMLInputElement;
@@ -610,7 +626,7 @@ function renderElevenLabsKeysList(keys: string[]) {
   if (keys.length === 0) {
     elKeysList.innerHTML = `
       <div style="font-size: 13px; color: var(--text-disabled); font-style: italic; padding: 4px 0;">
-        No API keys added. Reverts to default free limits.
+        No keys yet. Add at least one ElevenLabs key to enable dictation.
       </div>
     `;
     return;
@@ -790,17 +806,20 @@ async function loadHistory(append = false) {
                   <div class="transcript-box">${escapeHtml(entry.raw_transcript)}</div>
                 </div>
                 <div>
-                  <div class="transcript-label">FINAL INJECTED TEXT</div>
+                  <div class="transcript-label">RESULT</div>
                   <div class="transcript-box">${escapeHtml(entry.final_text)}</div>
                 </div>
               </div>
               <div style="display:flex; justify-content: space-between; align-items:center; font-size:12px; color: var(--text-muted); margin-top: 4px;">
                 <div>
-                  <span>Duration: ${(entry.duration_ms / 1000).toFixed(2)}s</span>
+                  <span>${(entry.duration_ms / 1000).toFixed(1)}s</span>
                   <span style="margin: 0 8px; color: var(--border-color);">|</span>
-                  <span>Words: ${entry.word_count}</span>
+                  <span>${entry.word_count} words</span>
                 </div>
-                <button class="btn btn-sm copy-history-text" data-text="${escapeHtml(entry.final_text)}">Copy Injected Text</button>
+                <div style="display:flex; gap:8px;">
+                  <button class="btn btn-sm copy-history-text" data-text="${escapeHtml(entry.final_text)}">Copy</button>
+                  <button class="btn btn-sm btn-danger delete-history" data-id="${entry.id}">Delete</button>
+                </div>
               </div>
             </div>
           </div>
@@ -848,6 +867,29 @@ async function loadHistory(append = false) {
       }
     });
 
+    // Wire per-row delete buttons
+    const deleteBtns = historyContainer.querySelectorAll(".delete-history");
+    deleteBtns.forEach(btn => {
+      if (!(btn as any).hasListener) {
+        (btn as any).hasListener = true;
+        btn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          const id = parseInt(btn.getAttribute("data-id") || "0");
+          if (!id) return;
+          if (!confirm("Delete this history entry?")) return;
+          try {
+            await invoke("history_delete", { id });
+            btn.closest(".history-row")?.remove();
+            if (historyContainer.querySelectorAll(".history-row").length === 0) {
+              await loadHistory();
+            }
+          } catch (err) {
+            showToast(`Failed to delete entry: ${err}`, "error");
+          }
+        });
+      }
+    });
+
     // Handle "Load More" visibility
     if (loadMoreBtn) {
       if (list.length === historyLimit) {
@@ -863,7 +905,7 @@ async function loadHistory(append = false) {
   }
 }
 
-// --- TELEMETRY INSIGHTS ---
+// --- INSIGHTS ---
 
 async function loadInsights() {
   try {

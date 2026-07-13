@@ -1,13 +1,13 @@
 //! Text injection — CONTRACTS §5 / §10.
 
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use arboard::Clipboard;
 use vf_core::InjectionMethod;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
-    VIRTUAL_KEY, VK_CONTROL, VK_V,
+    GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
+    KEYEVENTF_UNICODE, VIRTUAL_KEY, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT, VK_V,
 };
 
 /// Inject `text` into the currently focused field.
@@ -16,9 +16,57 @@ pub fn inject_text(
     method: InjectionMethod,
     restore_clipboard: bool,
 ) -> anyhow::Result<()> {
-    match method {
+    // The user may still be holding Ctrl/Shift from the push-to-talk chord.
+    // Injecting Ctrl+V (or typing) under held modifiers turns it into e.g.
+    // Ctrl+Shift+V inside the target app — wait for release, then force-clear
+    // anything still held.
+    settle_modifiers(Duration::from_millis(800));
+    let result = match method {
         InjectionMethod::ClipboardPaste => inject_clipboard_paste(text, restore_clipboard),
         InjectionMethod::SendInputTyping => inject_sendinput_typing(text),
+    };
+    // Leave the OS with a clean modifier state so mouse/keyboard feel normal
+    // after dictation (no phantom Shift+click).
+    force_release_all_modifiers();
+    result
+}
+
+/// Public: clear sticky modifiers after an utterance ends (even if inject was skipped).
+pub fn force_release_all_modifiers() {
+    const MODS: [VIRTUAL_KEY; 5] = [VK_CONTROL, VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN];
+    // Send key-ups for every standard modifier. Harmless if already up.
+    let ups: Vec<INPUT> = MODS.into_iter().map(|vk| key_input(vk, true)).collect();
+    unsafe {
+        let _ = SendInput(&ups, std::mem::size_of::<INPUT>() as i32);
+    }
+}
+
+/// Physical modifiers currently reported down by the OS.
+fn modifiers_physically_down() -> Vec<VIRTUAL_KEY> {
+    const MODS: [VIRTUAL_KEY; 5] = [VK_CONTROL, VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN];
+    MODS.iter()
+        .copied()
+        .filter(|vk| unsafe { GetAsyncKeyState(vk.0 as i32) as u16 & 0x8000 != 0 })
+        .collect()
+}
+
+/// Wait (bounded) for the push-to-talk modifiers to be physically released;
+/// if any are still held at the deadline, synthesize key-ups so the injected
+/// input sequence starts from a clean modifier state. A later physical release
+/// just produces a redundant key-up, which is harmless.
+fn settle_modifiers(max_wait: Duration) {
+    let deadline = Instant::now() + max_wait;
+    while Instant::now() < deadline {
+        if modifiers_physically_down().is_empty() {
+            return;
+        }
+        thread::sleep(Duration::from_millis(15));
+    }
+    let held = modifiers_physically_down();
+    if !held.is_empty() {
+        let ups: Vec<INPUT> = held.into_iter().map(|vk| key_input(vk, true)).collect();
+        unsafe { SendInput(&ups, std::mem::size_of::<INPUT>() as i32) };
+        thread::sleep(Duration::from_millis(10));
     }
 }
 

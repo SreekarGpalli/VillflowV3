@@ -5,7 +5,8 @@ use std::time::Instant;
 
 use tokio::sync::{broadcast, mpsc, Mutex};
 use vf_cloud::{
-    build_command, build_dictation, build_keyterms, chat_completion, PromptContext, SttSession,
+    build_command, build_command_generate, build_dictation, build_keyterms, chat_completion,
+    dictation_output_suspicious, strip_context_echo, PromptContext, SttSession,
 };
 use vf_core::{
     CleanupLevel, EngineCmd, EngineEvent, EngineState, HistoryEntry, Settings, Store,
@@ -17,7 +18,11 @@ use crate::context::{self, FocusContext};
 use crate::hotkeys::{self, HotkeyEvent, HotkeyId};
 use crate::inject;
 use crate::overlay::{self, OverlayCmd};
-use crate::util::{local_iso8601, word_count};
+use crate::util::{local_iso8601, tail_chars, word_count};
+
+/// Field-context cap sent to the LLM: enough for continuity, not enough to
+/// tempt the model into rewriting the document.
+const FIELD_CONTEXT_MAX_CHARS: usize = 600;
 
 struct EngineRuntime {
     settings: Settings,
@@ -153,22 +158,19 @@ pub async fn run(
                     }
                     Some(HotkeyEvent::Down(HotkeyId::CommandMode)) => {
                         if rt.state == EngineState::Idle {
+                            // Selection is optional: with one, the spoken command
+                            // transforms it; without, the command generates new
+                            // content inserted at the cursor.
                             let selection = tokio::task::spawn_blocking(
                                 context::read_selection_with_fallback,
                             )
                             .await
                             .ok()
-                            .flatten();
-                            match selection {
-                                None => {
-                                    overlay::show_toast(&rt.overlay_tx, "Select text first");
-                                }
-                                Some(sel) => {
-                                    begin_utterance(&mut rt, UtteranceMode::Command).await;
-                                    if let Some(active) = rt.active.as_mut() {
-                                        active.context.selection = Some(sel);
-                                    }
-                                }
+                            .flatten()
+                            .filter(|s| !s.trim().is_empty());
+                            begin_utterance(&mut rt, UtteranceMode::Command).await;
+                            if let Some(active) = rt.active.as_mut() {
+                                active.context.selection = selection;
                             }
                         }
                     }
@@ -285,6 +287,7 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
 
     // Empty / silence — do not inject or pollute history.
     if raw_transcript.trim().is_empty() {
+        inject::force_release_all_modifiers();
         overlay::show_toast(&rt.overlay_tx, "No speech detected");
         overlay::hide(&rt.overlay_tx);
         rt.set_state(EngineState::Idle);
@@ -292,32 +295,8 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
     }
 
     let mode = active.mode;
-    let mut ctx = active.context;
+    let ctx = active.context;
     let started = active.started;
-
-    // Command mode: re-check selection still exists before LLM/inject.
-    if mode == UtteranceMode::Command {
-        let still = tokio::task::spawn_blocking(context::read_selection_with_fallback)
-            .await
-            .ok()
-            .flatten();
-        if let Some(sel) = still {
-            if !sel.trim().is_empty() {
-                ctx.selection = Some(sel);
-            }
-        }
-        if ctx
-            .selection
-            .as_ref()
-            .map(|s| s.trim().is_empty())
-            .unwrap_or(true)
-        {
-            overlay::show_toast(&rt.overlay_tx, "Select text first");
-            overlay::hide(&rt.overlay_tx);
-            rt.set_state(EngineState::Idle);
-            return;
-        }
-    }
 
     let final_text = match mode {
         UtteranceMode::Dictation => {
@@ -327,7 +306,7 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
                     let dict_words = dictionary_words_ordered(&rt.store);
                     let prompt_ctx = PromptContext {
                         app_name: ctx.app_name.clone(),
-                        field_context: ctx.field_context.clone(),
+                        field_context: tail_chars(&ctx.field_context, FIELD_CONTEXT_MAX_CHARS),
                         dictionary: dict_words,
                     };
                     match build_dictation(
@@ -338,7 +317,7 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
                     ) {
                         None => raw_transcript.clone(),
                         Some(msgs) => {
-                            match chat_completion(
+                            let first = match chat_completion(
                                 &msgs.system,
                                 &msgs.user,
                                 &rt.settings.llm.model,
@@ -351,6 +330,52 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
                                     rt.error(format!("Groq failed: {e}"));
                                     return;
                                 }
+                            };
+                            // Safeguard: dictation cleans the transcript, it never
+                            // rewrites the document. Strip any echoed field context;
+                            // if the output still looks like a document rewrite,
+                            // redo the call without context (fallback: raw words).
+                            let stripped =
+                                strip_context_echo(&first, &prompt_ctx.field_context);
+                            let suspicious = stripped.trim().is_empty()
+                                || dictation_output_suspicious(
+                                    &stripped,
+                                    &prompt_ctx.field_context,
+                                    &raw_transcript,
+                                );
+                            if !suspicious {
+                                stripped
+                            } else {
+                                log::warn!(
+                                    "dictation output echoed field context; retrying without context"
+                                );
+                                let bare_ctx = PromptContext {
+                                    field_context: String::new(),
+                                    ..prompt_ctx.clone()
+                                };
+                                let retried = match build_dictation(
+                                    level,
+                                    &rt.settings.prompts,
+                                    &bare_ctx,
+                                    &raw_transcript,
+                                ) {
+                                    Some(m2) => chat_completion(
+                                        &m2.system,
+                                        &m2.user,
+                                        &rt.settings.llm.model,
+                                        &rt.settings.llm.api_key,
+                                    )
+                                    .await
+                                    .unwrap_or_else(|_| raw_transcript.clone()),
+                                    None => raw_transcript.clone(),
+                                };
+                                // Still strip any residual echo; fall back to raw STT if empty.
+                                let cleaned = strip_context_echo(&retried, &prompt_ctx.field_context);
+                                if cleaned.trim().is_empty() {
+                                    raw_transcript.clone()
+                                } else {
+                                    cleaned
+                                }
                             }
                         }
                     }
@@ -358,19 +383,31 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
             }
         }
         UtteranceMode::Command => {
-            let selection = ctx.selection.clone().unwrap_or_default();
             let dict_words = dictionary_words_ordered(&rt.store);
             let prompt_ctx = PromptContext {
                 app_name: ctx.app_name.clone(),
-                field_context: ctx.field_context.clone(),
+                field_context: tail_chars(&ctx.field_context, FIELD_CONTEXT_MAX_CHARS),
                 dictionary: dict_words,
             };
-            let msgs = build_command(
-                &rt.settings.prompts,
-                &prompt_ctx,
-                &raw_transcript, // spoken instruction
-                &selection,
-            );
+            // With a selection: transform it (result replaces the selection).
+            // Without: generate new content from the spoken instruction.
+            let selection = ctx
+                .selection
+                .clone()
+                .filter(|s| !s.trim().is_empty());
+            let msgs = match &selection {
+                Some(sel) => build_command(
+                    &rt.settings.prompts,
+                    &prompt_ctx,
+                    &raw_transcript, // spoken instruction
+                    sel,
+                ),
+                None => build_command_generate(
+                    &rt.settings.prompts,
+                    &prompt_ctx,
+                    &raw_transcript, // spoken instruction
+                ),
+            };
             match chat_completion(
                 &msgs.system,
                 &msgs.user,
@@ -447,6 +484,8 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
         rt.event_tx.clone(),
     );
 
+    // Belt-and-suspenders: never leave modifiers stuck after an utterance.
+    inject::force_release_all_modifiers();
     overlay::hide(&rt.overlay_tx);
     rt.set_state(EngineState::Idle);
 }
