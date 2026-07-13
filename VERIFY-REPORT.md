@@ -29,3 +29,15 @@ findings:
 - [info] Only the GrokBuild-owned `vf-engine` crate (+ Cargo.lock and an example) was touched — §4 ownership respected. No `// TODO(vf)` markers. No §2 non-goals, no telemetry, no API keys logged.
 - [minor/cosmetic] crates/vf-engine/src/overlay.rs:318 has a no-op `let _ = (GetDC, ReleaseDC);` to silence an unused-import warning. Harmless; not a contract issue. Could be removed by dropping the imports, but not necessary.
 fixes applied: none (build, clippy, and tests already clean — nothing to correct within the 30-line budget).
+
+## V4 — 2026-07-13
+build: PASS   clippy: PASS (0 warnings)   tests: PASS (36 tests)   npm run build (app/ui): PASS
+findings:
+- [info] Only Antigravity-owned crates touched (app/src-tauri, app/ui, plus minor additions to vf-core/vf-store which are also Antigravity-owned): `dictionary_update` was added to the `Store` trait (vf-core) and implemented (vf-store) to back the §13 `dictionary_update` IPC command. Consistent and within ownership §4.
+- [info] Dependencies added to app/src-tauri (vf-cloud, cpal, winreg) are all within the §3 whitelist. cpal/winreg explicitly allowed.
+- [info] §13 IPC commands — all 16 present and names match exactly: get_settings, save_settings, list_groq_models, list_input_devices (returns "system_default" pseudo-entry matching §10), dictionary_list/add/update/delete/toggle_star, history_list(limit,offset), insights_summary, scratchpad_get/set(content), reset_prompt(name)→vf-core default, set_autostart/autostart_status (HKCU …\Run value VillFlow = exe path via winreg). All are invoked from the UI (main.ts / scratchpad.ts).
+- [info] §14 UI windows — main window has all 10 nav sections (General, Dictation, Hotkeys, Dictionary, AI Services, Prompts, Output, History, Insights, About) and a separate always-on-top Scratchpad window (scratchpad.html). Plain dark theme, system font.
+- [todo-stub] app/src-tauri/src/main.rs:24 — `save_settings` has `// TODO(vf): wired in P5 - EngineCmd::ApplySettings`. This is the engine-boundary stub explicitly permitted by the Antigravity brief (engine host lands in P5); persistence via vf-store works. Listed per §16 rule 3.
+- [minor] `autostart_status` IPC command is defined and registered but not invoked by the frontend (the UI derives the "launch at startup" checkbox from `settings.json`, and `set_autostart` is called on save). Not a contract violation — the command exists and is usable — but it is currently dead from the UI's perspective.
+- [info] `npm run build` in app/ui succeeds (vite build, dist emitted). No `// TODO(vf)` markers elsewhere. No §2 non-goals, no telemetry, no API keys logged (list_groq_models reads the key but never returns or logs it).
+fixes applied: none (build, clippy, tests, and npm build all clean — nothing to correct within the 30-line budget).
