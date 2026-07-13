@@ -9,13 +9,13 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg-dark: #090a0f;
-      --bg-panel: rgba(22, 23, 38, 0.7);
-      --border-color: rgba(255, 255, 255, 0.08);
-      --text-main: #f3f4f6;
-      --text-muted: #9ca3af;
-      --accent: #6366f1;
-      --accent-hover: #4f46e5;
+      --bg-dark: #131314;
+      --bg-panel: #1e1f20;
+      --border-color: #444746;
+      --text-main: #e3e3e3;
+      --text-muted: #c4c7c5;
+      --accent: #a8c7fa;
+      --accent-hover: #8ab4f8;
     }
 
     * {
@@ -37,9 +37,8 @@
 
     /* Toolbar Styling (Floating Island) */
     .toolbar {
-      background: rgba(22, 23, 38, 0.75);
-      backdrop-filter: blur(20px);
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: var(--bg-panel);
+      border: 1px solid var(--border-color);
       padding: 6px 12px;
       display: flex;
       gap: 8px;
@@ -49,9 +48,7 @@
       left: 50%;
       transform: translateX(-50%);
       border-radius: 20px;
-      box-shadow: 
-        0 10px 30px rgba(0, 0, 0, 0.4),
-        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
       z-index: 10;
     }
 
@@ -67,7 +64,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      transition: all 0.2s ease;
     }
 
     .tool-btn:hover {
@@ -180,9 +177,6 @@
   </style>
 </head>
 <body>
-  <!-- Apple-inspired Glow Orb for Scratchpad -->
-  <div class="glow-orb" style="position: absolute; width: 250px; height: 250px; background: radial-gradient(circle, #6366f1 0%, transparent 75%); opacity: 0.06; filter: blur(70px); bottom: -50px; right: -50px; pointer-events: none; z-index: 0;"></div>
-
   <!-- Minimal Text Styling Toolbar -->
   <div class="toolbar">
     <button class="tool-btn bold" id="btn-bold" title="Bold">
