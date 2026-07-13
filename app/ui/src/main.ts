@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 // --- INTERFACES ---
 
@@ -76,6 +77,8 @@ let savedSettings: Settings | null = null;
 let currentSettings: Settings | null = null;
 let activeTab = "general";
 let editingWordId: number | null = null;
+let historyOffset = 0;
+const historyLimit = 15;
 
 // --- DOM ELEMENTS CACHE ---
 
@@ -95,12 +98,20 @@ async function init() {
   setupElevenLabsHandlers();
   setupGroqHandlers();
   setupPromptResetHandlers();
+  setupEngineEventListeners();
   
   await loadAudioDevices();
   await loadSettings();
   await loadDictionary();
   await loadHistory();
   await loadInsights();
+
+  // Wire up Load More button click
+  const loadMoreBtn = document.getElementById("history-load-more-btn");
+  loadMoreBtn?.addEventListener("click", () => {
+    historyOffset += historyLimit;
+    loadHistory(true);
+  });
 }
 
 // --- TAB ROUTING ---
@@ -154,7 +165,9 @@ function populateForm(settings: Settings) {
 
   // Dictation Tab
   const deviceSelect = document.getElementById("dict-audio-device") as HTMLSelectElement;
-  deviceSelect.value = settings.audio.input_device;
+  let devVal = settings.audio.input_device;
+  if (devVal === "system_default") devVal = "System default";
+  deviceSelect.value = devVal;
   
   const cleanups = document.getElementsByName("dict-cleanup");
   cleanups.forEach(radio => {
@@ -292,8 +305,9 @@ function setupSettingsChangeListeners() {
       await invoke("save_settings", { settings: currentSettings });
       savedSettings = JSON.parse(JSON.stringify(currentSettings));
       updateSaveBar();
+      showToast("Settings saved successfully.", "success");
     } catch (err) {
-      alert(`Failed to save settings: ${err}`);
+      showToast(`Failed to save settings: ${err}`, "error");
     }
   });
 
@@ -322,13 +336,13 @@ async function loadAudioDevices() {
     const devices = await invoke<string[]>("list_input_devices");
     const deviceSelect = document.getElementById("dict-audio-device") as HTMLSelectElement;
     
-    // Clear dynamic devices, keeping system_default
+    // Clear dynamic devices, keeping System default
     while (deviceSelect.options.length > 1) {
       deviceSelect.remove(1);
     }
 
     devices.forEach(device => {
-      if (device !== "system_default") {
+      if (device !== "System default" && device !== "system_default") {
         const opt = document.createElement("option");
         opt.value = device;
         opt.text = device;
@@ -385,6 +399,15 @@ function setupHotkeyRecorders() {
       if (key === "ARROWLEFT") key = "LEFT";
       if (key === "ARROWRIGHT") key = "RIGHT";
 
+      const isAlphaNum = /^[A-Z0-9]$/.test(key);
+      const isAllowedSpecial = ["ENTER", "SPACE", "TAB", "ESCAPE"].includes(key);
+
+      if (!isAlphaNum && !isAllowedSpecial) {
+        showToast("Only alphanumeric keys (A-Z, 0-9) and Enter/Space/Tab/Esc are supported for hotkeys.", "error");
+        input.blur();
+        return;
+      }
+
       parts.push(key);
       input.value = parts.join("+");
       input.blur();
@@ -427,13 +450,20 @@ function setupDictionaryHandlers() {
     try {
       if (editingWordId !== null) {
         await invoke("dictionary_update", { id: editingWordId, word });
+        showToast("Word updated successfully.", "success");
       } else {
         await invoke("dictionary_add", { word, source: "manual" });
+        showToast("Word added successfully.", "success");
       }
       wordModal?.classList.remove("active");
       await loadDictionary();
     } catch (err) {
-      alert(`Error saving word: ${err}`);
+      const errStr = String(err);
+      if (errStr.includes("UNIQUE constraint failed")) {
+        showToast(`"${word}" is already in the dictionary.`, "error");
+      } else {
+        showToast(`Error saving word: ${err}`, "error");
+      }
     }
   });
 }
@@ -462,14 +492,23 @@ async function loadDictionary() {
         <td><span style="font-size:12px; padding:2px 6px; border-radius:4px; background:rgba(255,255,255,0.05);">${entry.source}</span></td>
         <td>${entry.use_count}</td>
         <td>
-          <span class="star-btn" style="cursor:pointer; font-size:16px; color: ${entry.starred ? '#eab308' : 'var(--text-disabled)'};" data-id="${entry.id}">
-            ${entry.starred ? '&#9733;' : '&#9734;'}
+          <span class="star-btn" style="cursor:pointer; color: ${entry.starred ? '#eab308' : 'var(--text-disabled)'};" data-id="${entry.id}">
+            ${entry.starred 
+              ? `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="#eab308" stroke="#eab308" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>` 
+              : `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>`
+            }
           </span>
         </td>
         <td>
           <div style="display:flex; gap:6px;">
-            <button class="btn btn-sm edit-word" data-id="${entry.id}" data-word="${escapeHtml(entry.word)}">Edit</button>
-            <button class="btn btn-sm btn-danger delete-word" data-id="${entry.id}">Delete</button>
+            <button class="btn btn-sm edit-word" data-id="${entry.id}" data-word="${escapeHtml(entry.word)}">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z"></path></svg>
+              Edit
+            </button>
+            <button class="btn btn-sm btn-danger delete-word" data-id="${entry.id}">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+              Delete
+            </button>
           </div>
         </td>
       `;
@@ -560,9 +599,15 @@ function renderElevenLabsKeysList(keys: string[]) {
       <span class="key-index">${idx + 1}</span>
       <span class="key-value">${masked}</span>
       <div class="key-actions">
-        <button class="btn btn-sm move-key-up" data-idx="${idx}" ${idx === 0 ? 'disabled' : ''}>&uarr;</button>
-        <button class="btn btn-sm move-key-down" data-idx="${idx}" ${idx === keys.length - 1 ? 'disabled' : ''}>&darr;</button>
-        <button class="btn btn-sm btn-danger remove-key" data-idx="${idx}">Remove</button>
+        <button class="btn btn-sm move-key-up" data-idx="${idx}" ${idx === 0 ? 'disabled' : ''} title="Move Up">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>
+        </button>
+        <button class="btn btn-sm move-key-down" data-idx="${idx}" ${idx === keys.length - 1 ? 'disabled' : ''} title="Move Down">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><polyline points="19 12 12 19 5 12"></polyline></svg>
+        </button>
+        <button class="btn btn-sm btn-danger remove-key" data-idx="${idx}" title="Remove Key">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+        </button>
       </div>
     `;
     elKeysList.appendChild(row);
@@ -614,7 +659,10 @@ const groqModelSelect = document.getElementById("groq-model") as HTMLSelectEleme
 
 function setupGroqHandlers() {
   groqRefreshBtn?.addEventListener("click", async () => {
-    groqRefreshBtn.innerText = "Loading...";
+    const textEl = groqRefreshBtn.querySelector(".btn-text");
+    const iconEl = groqRefreshBtn.querySelector(".refresh-icon");
+    if (textEl) textEl.textContent = "Loading...";
+    if (iconEl) iconEl.classList.add("spinning");
     try {
       const models = await invoke<string[]>("list_groq_models");
       const currentSelected = groqModelSelect.value;
@@ -630,11 +678,12 @@ function setupGroqHandlers() {
         }
         groqModelSelect.add(opt);
       });
-      alert("Models updated successfully.");
+      showToast("Models updated successfully.", "success");
     } catch (err) {
-      alert(`Failed to fetch models: ${err}. Ensure your Groq API key is valid.`);
+      showToast(`Failed to fetch models: ${err}. Ensure your Groq API key is valid.`, "error");
     } finally {
-      groqRefreshBtn.innerText = "Refresh";
+      if (textEl) textEl.textContent = "Refresh";
+      if (iconEl) iconEl.classList.remove("spinning");
     }
   });
 }
@@ -666,18 +715,25 @@ function setupPromptResetHandlers() {
 
 const historyContainer = document.getElementById("history-container");
 
-async function loadHistory() {
+async function loadHistory(append = false) {
   try {
-    const list = await invoke<HistoryEntry[]>("history_list", { limit: 50, offset: 0 });
+    if (!append) {
+      historyOffset = 0;
+      if (historyContainer) historyContainer.innerHTML = "";
+    }
+    
+    const list = await invoke<HistoryEntry[]>("history_list", { limit: historyLimit, offset: historyOffset });
+    const loadMoreBtn = document.getElementById("history-load-more-btn") as HTMLButtonElement;
+    
     if (!historyContainer) return;
-    historyContainer.innerHTML = "";
 
-    if (list.length === 0) {
+    if (list.length === 0 && !append) {
       historyContainer.innerHTML = `
         <div style="text-align: center; color: var(--text-disabled); font-style: italic; padding: 40px 0;">
           No history items found.
         </div>
       `;
+      if (loadMoreBtn) loadMoreBtn.style.display = "none";
       return;
     }
 
@@ -696,7 +752,9 @@ async function loadHistory() {
             <span style="text-transform: capitalize; color: var(--accent); font-weight: 600;">${entry.mode}</span>
           </div>
           <div class="history-summary">${escapeHtml(entry.final_text)}</div>
-          <span class="expand-arrow" style="font-size:12px; color: var(--text-disabled);">&#9660;</span>
+          <span class="expand-arrow" style="display: inline-flex; align-items: center; justify-content: center;">
+            <svg class="chevron-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </span>
         </div>
         <div class="history-body">
           <div class="transcript-block">
@@ -722,40 +780,55 @@ async function loadHistory() {
       historyContainer.appendChild(row);
     });
 
-    // Wire expandable accordion logic
-    document.querySelectorAll(".history-header").forEach(header => {
-      header.addEventListener("click", () => {
-        const body = header.nextElementSibling as HTMLDivElement;
-        const arrow = header.querySelector(".expand-arrow") as HTMLSpanElement;
-        
-        const isActive = body.classList.contains("active");
-        
-        // Close others
-        document.querySelectorAll(".history-body").forEach(b => b.classList.remove("active"));
-        document.querySelectorAll(".expand-arrow").forEach(a => (a.innerHTML = "&#9660;"));
+    // Wire expandable accordion logic for dynamically added rows
+    const headers = historyContainer.querySelectorAll(".history-header");
+    headers.forEach(header => {
+      if (!(header as any).hasListener) {
+        (header as any).hasListener = true;
+        header.addEventListener("click", () => {
+          const row = header.closest(".history-row");
+          const body = header.nextElementSibling as HTMLDivElement;
+          const isActive = body.classList.contains("active");
+          
+          historyContainer.querySelectorAll(".history-body").forEach(b => b.classList.remove("active"));
+          historyContainer.querySelectorAll(".history-row").forEach(r => r.classList.remove("expanded"));
 
-        if (!isActive) {
-          body.classList.add("active");
-          arrow.innerHTML = "&#9650;";
-        }
-      });
+          if (!isActive) {
+            body.classList.add("active");
+            row?.classList.add("expanded");
+          }
+        });
+      }
     });
 
-    // Wire copy buttons
-    document.querySelectorAll(".copy-history-text").forEach(btn => {
-      btn.addEventListener("click", async (e) => {
-        e.stopPropagation(); // Avoid triggering header click
-        const text = btn.getAttribute("data-text") || "";
-        try {
-          await navigator.clipboard.writeText(text);
-          const origText = btn.innerHTML;
-          btn.innerHTML = "Copied!";
-          setTimeout(() => { btn.innerHTML = origText; }, 1500);
-        } catch (err) {
-          console.error("Failed to copy text:", err);
-        }
-      });
+    // Wire copy buttons safely
+    const copyBtns = historyContainer.querySelectorAll(".copy-history-text");
+    copyBtns.forEach(btn => {
+      if (!(btn as any).hasListener) {
+        (btn as any).hasListener = true;
+        btn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          const text = unescapeHtml(btn.getAttribute("data-text") || "");
+          try {
+            await navigator.clipboard.writeText(text);
+            const origText = btn.innerHTML;
+            btn.innerHTML = "Copied!";
+            setTimeout(() => { btn.innerHTML = origText; }, 1500);
+          } catch (err) {
+            console.error("Failed to copy text:", err);
+          }
+        });
+      }
     });
+
+    // Handle "Load More" visibility
+    if (loadMoreBtn) {
+      if (list.length === historyLimit) {
+        loadMoreBtn.style.display = "inline-flex";
+      } else {
+        loadMoreBtn.style.display = "none";
+      }
+    }
 
   } catch (err) {
     console.error("Failed to load history list:", err);
@@ -822,7 +895,17 @@ function renderHeatmap(dailyWords: [string, number][]) {
   });
 
   const now = new Date();
-  const cells: HTMLDivElement[] = [];
+  
+  // Prepend empty cells to align with the starting day of the week
+  const startDate = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+  const startDay = startDate.getDay();
+  for (let s = 0; s < startDay; s++) {
+    const cell = document.createElement("div");
+    cell.className = "heatmap-cell";
+    cell.style.opacity = "0";
+    cell.style.pointerEvents = "none";
+    grid.appendChild(cell);
+  }
 
   // Generate boxes starting from 365 days ago up to today
   for (let i = 365; i >= 0; i--) {
@@ -847,14 +930,8 @@ function renderHeatmap(dailyWords: [string, number][]) {
     }
 
     cell.title = `${dayStr}: ${wordCount} word${wordCount === 1 ? '' : 's'}`;
-    cells.push(cell);
-  }
-
-  // To draw a grid of 7 rows (Sunday to Saturday) columns-first,
-  // we align cells according to their day-of-week index.
-  cells.forEach(cell => {
     grid.appendChild(cell);
-  });
+  }
 }
 
 // --- UTILITIES ---
@@ -866,6 +943,69 @@ function escapeHtml(unsafe: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+function unescapeHtml(safe: string): string {
+  return safe
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'");
+}
+
+function showToast(message: string, type: "success" | "error" | "info" = "info") {
+  const container = document.getElementById("toast-container");
+  if (!container) return;
+
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${type}`;
+  toast.innerHTML = `
+    <span class="toast-icon"></span>
+    <span>${escapeHtml(message)}</span>
+  `;
+
+  container.appendChild(toast);
+
+  // Force reflow
+  setTimeout(() => toast.classList.add("active"), 10);
+
+  // Remove toast after 4 seconds
+  setTimeout(() => {
+    toast.classList.remove("active");
+    setTimeout(() => toast.remove(), 300);
+  }, 4000);
+}
+
+async function setupEngineEventListeners() {
+  const statusBadge = document.getElementById("engine-status-badge");
+  const statusText = statusBadge?.querySelector(".status-text");
+
+  if (statusBadge && statusText) {
+    try {
+      await listen<string>("engine-state", (event) => {
+        const state = event.payload;
+        // Reset state classes
+        statusBadge.className = "engine-status";
+        statusText.textContent = state;
+
+        if (state === "Recording") {
+          statusBadge.classList.add("recording");
+        } else if (state === "Processing") {
+          statusBadge.classList.add("processing");
+        } else if (state === "Injecting") {
+          statusBadge.classList.add("injecting");
+        }
+      });
+
+      await listen<string>("engine-error", (event) => {
+        const errMsg = event.payload;
+        showToast(`Engine Error: ${errMsg}`, "error");
+      });
+    } catch (err) {
+      console.error("Failed to setup engine state event listeners:", err);
+    }
+  }
 }
 
 // --- BOOTSTRAP ---

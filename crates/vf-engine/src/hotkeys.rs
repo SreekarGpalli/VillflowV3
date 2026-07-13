@@ -1,10 +1,14 @@
 //! Global hotkeys via `WH_KEYBOARD_LL` — CONTRACTS §5.
 //!
 //! Push-to-talk needs key-up; events for matched combos are swallowed.
+//!
+//! Shared hook state is held in a replaceable `Mutex<Option<Arc<…>>>` (not
+//! `OnceLock`) so a second engine spawn / test run can re-bind the event
+//! channel and combos without being stuck on process-wide once-init state.
 
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -111,7 +115,8 @@ struct ComboSet {
 
 struct HookShared {
     combos: Mutex<ComboSet>,
-    event_tx: mpsc::UnboundedSender<HotkeyEvent>,
+    /// Replaced on each `start()` so a respawned engine receives events.
+    event_tx: Mutex<mpsc::UnboundedSender<HotkeyEvent>>,
     /// Currently engaged push-to-talk / hold combos (dictation & command).
     engaged: Mutex<HashSet<HotkeyId>>,
 }
@@ -123,13 +128,20 @@ struct SendHook(HHOOK);
 unsafe impl Send for SendHook {}
 unsafe impl Sync for SendHook {}
 
-static HOOK: OnceLock<Mutex<Option<SendHook>>> = OnceLock::new();
-static SHARED: OnceLock<HookShared> = OnceLock::new();
+/// Replaceable process-global state (required by the free-function hook proc).
+static HOOK: Mutex<Option<SendHook>> = Mutex::new(None);
+static SHARED: Mutex<Option<Arc<HookShared>>> = Mutex::new(None);
 static HOOK_THREAD_RUNNING: AtomicBool = AtomicBool::new(false);
+
+fn current_shared() -> Option<Arc<HookShared>> {
+    SHARED.lock().ok().and_then(|g| g.clone())
+}
 
 /// Start the low-level keyboard hook on a dedicated thread.
 ///
 /// Returns a channel of [`HotkeyEvent`]s. Call [`update_combos`] after settings changes.
+/// Safe to call again after a prior engine lifetime: combos and the event sender
+/// are rebound even if the OS hook thread is already running.
 pub fn start(
     dictation: &str,
     command_mode: &str,
@@ -145,14 +157,27 @@ pub fn start(
             .ok_or_else(|| anyhow::anyhow!("invalid scratchpad hotkey: {scratchpad}"))?,
     };
 
-    let _ = SHARED.set(HookShared {
-        combos: Mutex::new(combos),
-        event_tx: tx,
-        engaged: Mutex::new(HashSet::new()),
-    });
+    {
+        let mut slot = SHARED
+            .lock()
+            .map_err(|_| anyhow::anyhow!("hotkey shared state poisoned"))?;
+        if let Some(existing) = slot.as_ref() {
+            // Rebind to the new engine instance without restarting the hook thread.
+            *existing.combos.lock().unwrap() = combos;
+            *existing.event_tx.lock().unwrap() = tx;
+            existing.engaged.lock().unwrap().clear();
+            return Ok(rx);
+        }
+        *slot = Some(Arc::new(HookShared {
+            combos: Mutex::new(combos),
+            event_tx: Mutex::new(tx),
+            engaged: Mutex::new(HashSet::new()),
+        }));
+    }
 
     if HOOK_THREAD_RUNNING.swap(true, Ordering::SeqCst) {
-        // Already running — combos already updated via SHARED.
+        // Shared was empty but the flag said running (race after teardown) —
+        // the new SHARED above is enough; the live hook will pick it up.
         return Ok(rx);
     }
 
@@ -168,8 +193,7 @@ pub fn start(
                 );
                 match hook {
                     Ok(h) => {
-                        let slot = HOOK.get_or_init(|| Mutex::new(None));
-                        *slot.lock().unwrap() = Some(SendHook(h));
+                        *HOOK.lock().unwrap() = Some(SendHook(h));
                         // Message pump required for LL hooks on this thread.
                         let mut msg = windows::Win32::UI::WindowsAndMessaging::MSG::default();
                         while windows::Win32::UI::WindowsAndMessaging::GetMessageW(
@@ -180,7 +204,7 @@ pub fn start(
                             let _ = windows::Win32::UI::WindowsAndMessaging::TranslateMessage(&msg);
                             windows::Win32::UI::WindowsAndMessaging::DispatchMessageW(&msg);
                         }
-                        if let Some(SendHook(h)) = slot.lock().unwrap().take() {
+                        if let Some(SendHook(h)) = HOOK.lock().unwrap().take() {
                             let _ = UnhookWindowsHookEx(h);
                         }
                     }
@@ -190,6 +214,9 @@ pub fn start(
                 }
             }
             HOOK_THREAD_RUNNING.store(false, Ordering::SeqCst);
+            if let Ok(mut slot) = SHARED.lock() {
+                *slot = None;
+            }
         })?;
 
     // Brief settle so the hook is installed before first keypress.
@@ -198,7 +225,7 @@ pub fn start(
 }
 
 pub fn update_combos(dictation: &str, command_mode: &str, scratchpad: &str) -> anyhow::Result<()> {
-    let Some(shared) = SHARED.get() else {
+    let Some(shared) = current_shared() else {
         return Ok(());
     };
     let set = ComboSet {
@@ -268,7 +295,7 @@ unsafe extern "system" fn low_level_proc(code: i32, wparam: WPARAM, lparam: LPAR
         return CallNextHookEx(None, code, wparam, lparam);
     }
 
-    let Some(shared) = SHARED.get() else {
+    let Some(shared) = current_shared() else {
         return CallNextHookEx(None, code, wparam, lparam);
     };
 
@@ -294,6 +321,7 @@ unsafe extern "system" fn low_level_proc(code: i32, wparam: WPARAM, lparam: LPAR
     let (ctrl, shift, alt, win) = adjust_mods_for_event(vk, is_down, ctrl, shift, alt, win);
 
     let mut swallow = false;
+    let event_tx = shared.event_tx.lock().unwrap().clone();
 
     if is_down && !is_modifier_vk(vk) {
         // Match main key + modifiers.
@@ -308,7 +336,7 @@ unsafe extern "system" fn low_level_proc(code: i32, wparam: WPARAM, lparam: LPAR
                 let mut engaged = shared.engaged.lock().unwrap();
                 if !engaged.contains(&id) {
                     engaged.insert(id);
-                    let _ = shared.event_tx.send(HotkeyEvent::Down(id));
+                    let _ = event_tx.send(HotkeyEvent::Down(id));
                 }
             }
         }
@@ -326,7 +354,7 @@ unsafe extern "system" fn low_level_proc(code: i32, wparam: WPARAM, lparam: LPAR
             if combo_involves(combo, vk) {
                 swallow = true;
                 engaged.remove(&id);
-                let _ = shared.event_tx.send(HotkeyEvent::Up(id));
+                let _ = event_tx.send(HotkeyEvent::Up(id));
             }
         }
         // Also swallow modifier/key ups that belong to a configured combo even if not engaged,
@@ -365,6 +393,10 @@ unsafe extern "system" fn low_level_proc(code: i32, wparam: WPARAM, lparam: LPAR
     }
 }
 
+/// Align tracked modifier flags with the event currently being processed.
+///
+/// `GetAsyncKeyState` can lag the LL hook by one event; we force the in-flight
+/// key's state on both key-down **and** key-up so modifiers cannot stick.
 fn adjust_mods_for_event(
     vk: u16,
     is_down: bool,
@@ -373,22 +405,17 @@ fn adjust_mods_for_event(
     mut alt: bool,
     mut win: bool,
 ) -> (bool, bool, bool, bool) {
-    let set = |flag: &mut bool| {
-        if is_down {
-            *flag = true;
-        }
-    };
     if is_ctrl_vk(vk) {
-        set(&mut ctrl);
+        ctrl = is_down;
     }
     if is_shift_vk(vk) {
-        set(&mut shift);
+        shift = is_down;
     }
     if is_alt_vk(vk) {
-        set(&mut alt);
+        alt = is_down;
     }
     if is_win_vk(vk) {
-        set(&mut win);
+        win = is_down;
     }
     (ctrl, shift, alt, win)
 }
@@ -408,5 +435,19 @@ mod tests {
     fn parse_case_insensitive() {
         let c = KeyCombo::parse("ctrl+shift+x").unwrap();
         assert_eq!(c.key_vk, b'X' as u16);
+    }
+
+    #[test]
+    fn adjust_mods_clears_on_keyup() {
+        // Ctrl down → true; Ctrl up → false (previously stuck true).
+        let (c, s, a, w) = adjust_mods_for_event(VK_CONTROL.0, true, false, false, false, false);
+        assert!(c && !s && !a && !w);
+        let (c, s, a, w) = adjust_mods_for_event(VK_CONTROL.0, false, true, true, false, false);
+        assert!(!c && s && !a && !w);
+
+        let (c, s, a, w) = adjust_mods_for_event(VK_LSHIFT.0, true, false, false, false, false);
+        assert!(!c && s && !a && !w);
+        let (c, s, a, w) = adjust_mods_for_event(VK_LSHIFT.0, false, false, true, false, false);
+        assert!(!c && !s && !a && !w);
     }
 }

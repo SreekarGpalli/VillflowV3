@@ -12,9 +12,10 @@ vf-core = { path = "../../crates/vf-core" }
 vf-store = { path = "../../crates/vf-store" }
 vf-cloud = { path = "../../crates/vf-cloud" }
 vf-engine = { path = "../../crates/vf-engine" }
-cpal = "0.15"
 winreg = "0.52"
 tauri-plugin-notification = "2"
+env_logger = "0.11"
+log = "0.4"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

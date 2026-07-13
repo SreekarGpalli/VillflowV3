@@ -2,7 +2,7 @@
 //!
 //! Best-effort: any failure returns partial/`None` fields rather than hard errors.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use arboard::Clipboard;
 use windows::core::Interface;
@@ -10,6 +10,7 @@ use windows::Win32::Foundation::{CloseHandle, HWND, MAX_PATH};
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
 };
+use windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
 use windows::Win32::System::ProcessStatus::K32GetModuleFileNameExW;
 use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
 use windows::Win32::UI::Accessibility::{
@@ -81,17 +82,39 @@ pub fn read_selection_with_fallback() -> Option<String> {
     selection_via_clipboard()
 }
 
+/// Simulated Ctrl+C selection fallback with a narrowed clipboard race window.
+///
+/// Uses a unique sentinel + `GetClipboardSequenceNumber` polling (short 5ms
+/// ticks) instead of a fixed 40ms sleep, and aborts if the foreground window
+/// changes mid-copy so foreign clipboard writes are not treated as selection.
 fn selection_via_clipboard() -> Option<String> {
+    let target_hwnd = unsafe { GetForegroundWindow() };
+    if target_hwnd.0.is_null() {
+        return None;
+    }
+
     let mut clip = Clipboard::new().ok()?;
     let previous = clip.get_text().ok();
-    let _ = clip.set_text(String::new());
+
+    // Sentinel proves the next non-matching clipboard text replaced our marker
+    // (typically via Ctrl+C), not a stale previous value.
+    let marker = format!(
+        "__villflow_sel_{}_{}__",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    );
+    clip.set_text(marker.clone()).ok()?;
+
+    let seq_before = unsafe { GetClipboardSequenceNumber() };
 
     unsafe {
         send_ctrl_key(0x43); // 'C'
     }
-    std::thread::sleep(Duration::from_millis(40));
 
-    let selected = clip.get_text().ok().filter(|s| !s.is_empty());
+    let selected = poll_selection_clipboard(&mut clip, &marker, seq_before, target_hwnd);
 
     match previous {
         Some(p) => {
@@ -102,6 +125,55 @@ fn selection_via_clipboard() -> Option<String> {
         }
     }
     selected
+}
+
+/// Poll for a clipboard update that looks like our Ctrl+C result.
+///
+/// Max wait is short (~50ms) with 5ms steps so the clipboard is not held open
+/// for a long fixed sleep while other apps could race it.
+fn poll_selection_clipboard(
+    clip: &mut Clipboard,
+    marker: &str,
+    seq_before: u32,
+    target_hwnd: HWND,
+) -> Option<String> {
+    const STEP: Duration = Duration::from_millis(5);
+    const BUDGET: Duration = Duration::from_millis(50);
+    let deadline = Instant::now() + BUDGET;
+    let mut saw_seq_change = false;
+
+    loop {
+        // Focus left the original app — do not trust clipboard contents.
+        let fg = unsafe { GetForegroundWindow() };
+        if fg != target_hwnd {
+            return None;
+        }
+
+        let seq = unsafe { GetClipboardSequenceNumber() };
+        if seq != seq_before {
+            saw_seq_change = true;
+            if let Ok(text) = clip.get_text() {
+                if !text.is_empty() && text != marker {
+                    return Some(text);
+                }
+            }
+        }
+
+        if Instant::now() >= deadline {
+            if !saw_seq_change {
+                return None;
+            }
+            let fg = unsafe { GetForegroundWindow() };
+            if fg != target_hwnd {
+                return None;
+            }
+            return clip
+                .get_text()
+                .ok()
+                .filter(|s| !s.is_empty() && s != marker);
+        }
+        std::thread::sleep(STEP);
+    }
 }
 
 unsafe fn send_ctrl_key(vk: u16) {

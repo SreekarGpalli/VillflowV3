@@ -375,7 +375,9 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
     }
 
     let total_ms = started.elapsed().as_millis() as u64;
-    let words = word_count(&final_text);
+    // `EngineEvent::Injected.words` is `u32` (vf-core); SQLite `HistoryEntry.word_count` is `i64`.
+    let words_u32 = word_count(&final_text);
+    let words_i64 = i64::from(words_u32);
 
     let history_mode = match mode {
         UtteranceMode::Dictation => "dictation",
@@ -390,14 +392,14 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
         raw_transcript: raw_transcript.clone(),
         final_text: final_text.clone(),
         duration_ms: total_ms as i64,
-        word_count: words as i64,
+        word_count: words_i64,
     };
     if let Err(e) = rt.store.history_append(&entry) {
         log::warn!("history_append failed: {e}");
     }
 
     rt.emit(EngineEvent::Injected {
-        words,
+        words: words_u32,
         total_ms,
     });
 

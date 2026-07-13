@@ -2,9 +2,12 @@
 //!
 //! `WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW`, pill bottom-center,
 //! never takes focus. Hidden when Idle.
+//!
+//! State is held in a replaceable `Mutex<Option<Arc<…>>>` (not `OnceLock`) so the
+//! overlay can be shut down and started again during tests / engine respawn.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -56,25 +59,39 @@ struct OverlayShared {
     hwnd: Mutex<Option<SendHwnd>>,
 }
 
-static SHARED: OnceLock<OverlayShared> = OnceLock::new();
+/// Process-global only because `wnd_proc` is a free Win32 callback. Replaced on
+/// each `start()` and cleared on clean shutdown so the engine can respawn.
+static SHARED: Mutex<Option<Arc<OverlayShared>>> = Mutex::new(None);
 static STARTED: AtomicBool = AtomicBool::new(false);
 
+fn current_shared() -> Option<Arc<OverlayShared>> {
+    SHARED.lock().ok().and_then(|g| g.clone())
+}
+
 /// Start the overlay UI thread. Returns a command sender.
+///
+/// Safe to call again after a previous instance shut down (or while still
+/// running — commands are forwarded to the live window).
 pub fn start() -> mpsc::UnboundedSender<OverlayCmd> {
     let (tx, mut rx) = mpsc::unbounded_channel::<OverlayCmd>();
-    let _ = SHARED.set(OverlayShared {
-        state: Mutex::new(OverlayState::Hidden),
-        hwnd: Mutex::new(None),
-    });
 
     if STARTED.swap(true, Ordering::SeqCst) {
-        // Already running; drop rx on a worker that applies cmds.
+        // Already running; forward cmds to the live window via SHARED.
         thread::spawn(move || {
             while let Some(cmd) = rx.blocking_recv() {
                 apply_cmd(cmd);
             }
         });
         return tx;
+    }
+
+    // Fresh lifetime — install replaceable shared state (not OnceLock).
+    let shared = Arc::new(OverlayShared {
+        state: Mutex::new(OverlayState::Hidden),
+        hwnd: Mutex::new(None),
+    });
+    if let Ok(mut slot) = SHARED.lock() {
+        *slot = Some(shared);
     }
 
     thread::Builder::new()
@@ -84,6 +101,9 @@ pub fn start() -> mpsc::UnboundedSender<OverlayCmd> {
                 log::error!("overlay thread error: {e}");
             }
             STARTED.store(false, Ordering::SeqCst);
+            if let Ok(mut slot) = SHARED.lock() {
+                *slot = None;
+            }
         })
         .expect("spawn overlay thread");
 
@@ -91,7 +111,7 @@ pub fn start() -> mpsc::UnboundedSender<OverlayCmd> {
 }
 
 fn apply_cmd(cmd: OverlayCmd) {
-    let Some(shared) = SHARED.get() else {
+    let Some(shared) = current_shared() else {
         return;
     };
     match cmd {
@@ -148,7 +168,7 @@ fn run_overlay_thread(rx: &mut mpsc::UnboundedReceiver<OverlayCmd>) -> anyhow::R
         // Dark semi-opaque background.
         let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), 220, LWA_ALPHA);
 
-        if let Some(shared) = SHARED.get() {
+        if let Some(shared) = current_shared() {
             *shared.hwnd.lock().unwrap() = Some(SendHwnd(hwnd));
         }
 
@@ -179,7 +199,7 @@ fn run_overlay_thread(rx: &mut mpsc::UnboundedReceiver<OverlayCmd>) -> anyhow::R
                 DispatchMessageW(&msg);
             } else {
                 // Expire toast.
-                if let Some(shared) = SHARED.get() {
+                if let Some(shared) = current_shared() {
                     let mut st = shared.state.lock().unwrap();
                     if let OverlayState::Toast { until, .. } = &*st {
                         if Instant::now() >= *until {
@@ -193,7 +213,7 @@ fn run_overlay_thread(rx: &mut mpsc::UnboundedReceiver<OverlayCmd>) -> anyhow::R
             }
         }
 
-        if let Some(shared) = SHARED.get() {
+        if let Some(shared) = current_shared() {
             *shared.hwnd.lock().unwrap() = None;
         }
     }
@@ -209,7 +229,7 @@ unsafe fn position_bottom_center(hwnd: HWND) {
 }
 
 unsafe fn refresh_visibility(hwnd: HWND) {
-    let Some(shared) = SHARED.get() else {
+    let Some(shared) = current_shared() else {
         return;
     };
     let state = shared.state.lock().unwrap().clone();
@@ -250,8 +270,7 @@ unsafe fn paint(hwnd: HWND) {
     let hdc = BeginPaint(hwnd, &mut ps);
 
     let (label, level) = {
-        let state = SHARED
-            .get()
+        let state = current_shared()
             .map(|s| s.state.lock().unwrap().clone())
             .unwrap_or(OverlayState::Hidden);
         match state {
@@ -262,8 +281,8 @@ unsafe fn paint(hwnd: HWND) {
         }
     };
 
-    // Background fill (dark).
-    let brush = CreateSolidBrush(COLORREF(0x002_21A1A)); // dark blue-gray BGR
+    // Background: RGB(0x1A, 0x1A, 0x22) dark blue-gray, stored as COLORREF 0x00BBGGRR.
+    let brush = CreateSolidBrush(COLORREF(0x00221A1A));
     let rect = RECT {
         left: 0,
         top: 0,
@@ -274,9 +293,10 @@ unsafe fn paint(hwnd: HWND) {
     let _ = DeleteObject(brush.into());
 
     // Level pulse bar under text when recording.
+    // Pulse: RGB(0x60, 0xA0, 0xC8) soft blue, stored as COLORREF 0x00BBGGRR.
     if level > 0.01 {
         let bar_w = ((PILL_W as f32 - 24.0) * level.clamp(0.0, 1.0)) as i32;
-        let pulse = CreateSolidBrush(COLORREF(0x00C8A060)); // soft blue-ish BGR
+        let pulse = CreateSolidBrush(COLORREF(0x00C8A060));
         let bar = RECT {
             left: 12,
             top: PILL_H - 8,

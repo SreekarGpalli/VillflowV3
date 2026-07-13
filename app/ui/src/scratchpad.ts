@@ -6,6 +6,32 @@ let saveStatus: HTMLSpanElement | null = null;
 let wordCountDisplay: HTMLSpanElement | null = null;
 let debounceTimeout: number | null = null;
 
+function sanitizeHtml(html: string): string {
+  const temp = document.createElement("div");
+  temp.innerHTML = html;
+  
+  const scripts = temp.getElementsByTagName("script");
+  while (scripts.length > 0) {
+    scripts[0].parentNode?.removeChild(scripts[0]);
+  }
+
+  const allElements = temp.getElementsByTagName("*");
+  for (let i = 0; i < allElements.length; i++) {
+    const el = allElements[i];
+    const attrs = Array.from(el.attributes);
+    for (const attr of attrs) {
+      if (attr.name.startsWith("on")) {
+        el.removeAttribute(attr.name);
+      }
+      if (attr.name === "href" && attr.value.trim().toLowerCase().startsWith("javascript:")) {
+        el.removeAttribute(attr.name);
+      }
+    }
+  }
+
+  return temp.innerHTML;
+}
+
 function updateWordCount(text: string) {
   if (!wordCountDisplay) return;
   const clean = text.trim();
@@ -20,18 +46,24 @@ function updateWordCount(text: string) {
 async function saveContent() {
   if (!editor || !saveStatus) return;
   saveStatus.innerText = "Saving...";
+  saveStatus.className = "status-saving";
   
-  const content = editor.innerHTML;
+  const content = sanitizeHtml(editor.innerHTML);
   try {
     await invoke("scratchpad_set", { content });
     saveStatus.innerText = "Saved";
+    saveStatus.className = "status-saved";
   } catch (err) {
     saveStatus.innerText = `Error: ${err}`;
+    saveStatus.className = "status-error";
   }
 }
 
 function triggerSave() {
-  if (saveStatus) saveStatus.innerText = "Unsaved changes";
+  if (saveStatus) {
+    saveStatus.innerText = "Unsaved changes";
+    saveStatus.className = "status-unsaved";
+  }
   if (debounceTimeout) {
     clearTimeout(debounceTimeout);
   }
@@ -67,7 +99,7 @@ async function init() {
   // Load initial content
   try {
     const initialContent = await invoke<string>("scratchpad_get");
-    editor.innerHTML = initialContent;
+    editor.innerHTML = sanitizeHtml(initialContent);
     updateWordCount(editor.innerText);
   } catch (err) {
     console.error("Failed to load scratchpad:", err);
@@ -79,16 +111,14 @@ async function init() {
   });
 
   // Intercept close button to hide instead of destroying
-  if (window.navigator.userAgent.includes("Tauri") || (window as any).__TAURI_INTERNALS__) {
-    try {
-      const appWindow = getCurrentWindow();
-      await appWindow.onCloseRequested(async (event) => {
-        event.preventDefault();
-        await appWindow.hide();
-      });
-    } catch (e) {
-      console.error("Failed to setup close handler:", e);
-    }
+  try {
+    const appWindow = getCurrentWindow();
+    await appWindow.onCloseRequested(async (event) => {
+      event.preventDefault();
+      await appWindow.hide();
+    });
+  } catch (e) {
+    console.error("Failed to setup close handler:", e);
   }
 }
 

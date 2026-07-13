@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>VillFlow Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     :root {
       --bg-dark: #07080d;
@@ -32,12 +35,32 @@
     }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background: var(--bg-gradient);
       color: var(--text-main);
       height: 100vh;
       overflow: hidden;
       display: flex;
+    }
+
+    /* Modern Custom Scrollbars */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 3px;
+      transition: background 0.2s ease;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.18);
     }
 
     /* Layout structure */
@@ -129,11 +152,12 @@
     /* Content Area */
     .content-container {
       flex: 1;
-      padding: 36px 48px;
+      padding: 36px 48px 120px 48px; /* Extra bottom padding so floating save bar doesn't overlap content */
       overflow-y: auto;
       display: flex;
       flex-direction: column;
       gap: 28px;
+      position: relative;
     }
 
     .tab-content {
@@ -199,11 +223,19 @@
 
     .form-row {
       display: flex;
-      gap: 16px;
+      gap: 12px;
+      align-items: stretch;
     }
 
     .form-row .form-group {
       flex: 1;
+    }
+
+    .form-row input,
+    .form-row select,
+    .form-row button,
+    .form-row .btn {
+      height: 42px; /* Set a standard height for aligned controls */
     }
 
     label {
@@ -212,10 +244,10 @@
       color: var(--text-muted);
     }
 
-    input[type="text"], input[type="password"], select, textarea {
+    input[type="text"], input[type="password"], select {
       background: rgba(0, 0, 0, 0.25);
       border: 1px solid var(--border-color);
-      border-radius: 8px;
+      border-radius: 10px;
       padding: 10px 14px;
       color: var(--text-main);
       font-family: inherit;
@@ -223,6 +255,23 @@
       outline: none;
       transition: all 0.2s ease;
       width: 100%;
+      height: 42px;
+    }
+
+    textarea {
+      background: rgba(5, 5, 8, 0.4);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 14px;
+      color: #e5e7eb;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 13px;
+      line-height: 1.6;
+      outline: none;
+      transition: all 0.2s ease;
+      width: 100%;
+      resize: vertical;
+      min-height: 120px;
     }
 
     input[type="text"]:focus, input[type="password"]:focus, select:focus, textarea:focus {
@@ -239,17 +288,33 @@
 
     .checkbox-label {
       display: flex;
-      align-items: center;
-      gap: 10px;
+      align-items: flex-start;
+      gap: 12px;
       cursor: pointer;
       font-size: 14px;
-      font-weight: 500;
+      font-weight: 550;
+      padding: 14px 18px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      transition: all 0.2s ease;
+    }
+
+    .checkbox-label:hover {
+      background: rgba(255, 255, 255, 0.04);
+      border-color: rgba(255, 255, 255, 0.08);
+    }
+
+    .checkbox-label input[type="radio"],
+    .checkbox-label input[type="checkbox"] {
+      margin-top: 3px;
     }
 
     .checkbox-label p {
       font-size: 12px;
       color: var(--text-muted);
       margin-top: 2px;
+      font-weight: 400;
     }
 
     /* Buttons */
@@ -258,7 +323,7 @@
       border: 1px solid var(--border-color);
       color: var(--text-main);
       padding: 10px 18px;
-      border-radius: 8px;
+      border-radius: 10px;
       font-size: 14px;
       font-weight: 600;
       cursor: pointer;
@@ -267,6 +332,8 @@
       align-items: center;
       justify-content: center;
       gap: 8px;
+      height: 42px;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
     }
 
     .btn:hover {
@@ -291,8 +358,8 @@
     }
 
     .btn-danger {
-      background: rgba(239, 68, 68, 0.15);
-      border: 1px solid rgba(239, 68, 68, 0.25);
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.2);
       color: #fca5a5;
     }
 
@@ -305,7 +372,8 @@
     .btn-sm {
       padding: 6px 12px;
       font-size: 12px;
-      border-radius: 6px;
+      border-radius: 8px;
+      height: 32px;
     }
 
     /* Table styling */
@@ -543,7 +611,7 @@
       height: 10px;
       background-color: rgba(255, 255, 255, 0.05);
       border-radius: 1px;
-      cursor: pointer;
+      cursor: default;
       position: relative;
     }
 
@@ -569,34 +637,47 @@
     }
 
     /* Modal dialogs */
+    /* Modal dialogs */
     .modal-overlay {
       position: fixed;
       top: 0;
       left: 0;
       width: 100vw;
       height: 100vh;
-      background: rgba(0, 0, 0, 0.7);
-      backdrop-filter: blur(4px);
-      display: none;
+      background: rgba(4, 5, 9, 0.85);
+      backdrop-filter: blur(8px);
+      opacity: 0;
+      visibility: hidden;
+      display: flex;
       align-items: center;
       justify-content: center;
       z-index: 100;
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      pointer-events: none;
     }
 
     .modal-overlay.active {
-      display: flex;
+      opacity: 1;
+      visibility: visible;
+      pointer-events: auto;
     }
 
     .modal-card {
-      background: #0f111a;
-      border: 1px solid var(--border-color);
-      border-radius: 16px;
-      padding: 24px;
-      width: 400px;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+      background: #0d0e16;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 18px;
+      padding: 28px;
+      width: 420px;
+      box-shadow: 0 24px 50px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05);
       display: flex;
       flex-direction: column;
       gap: 20px;
+      transform: scale(0.92);
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .modal-overlay.active .modal-card {
+      transform: scale(1);
     }
 
     .modal-actions {
@@ -607,35 +688,191 @@
 
     /* Utility */
     .save-bar {
-      margin-top: auto;
-      background: rgba(12, 13, 22, 0.95);
-      border: 1px solid var(--border-color);
-      border-radius: 12px;
+      position: fixed;
+      bottom: 24px;
+      left: 274px; /* sidebar width (250px) + content container margin (24px) */
+      right: 48px;
+      max-width: 852px;
+      background: rgba(15, 17, 28, 0.85);
+      border: 1px solid rgba(99, 102, 241, 0.2);
+      border-radius: 14px;
       padding: 16px 24px;
       display: none;
       align-items: center;
       justify-content: space-between;
-      backdrop-filter: blur(10px);
-      box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.2);
-      max-width: 900px;
+      backdrop-filter: blur(20px);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(99, 102, 241, 0.1);
+      z-index: 90;
+      animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
     }
 
     .save-bar.active {
       display: flex;
     }
 
+    @keyframes slideUp {
+      from { transform: translateY(20px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+
     .save-bar-text {
       font-size: 13px;
       color: var(--text-muted);
+      font-weight: 500;
     }
+
+    /* Animation & Interactive Utilities */
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    .spinning {
+      animation: spin 1.2s linear infinite;
+    }
+
+    .chevron-icon {
+      transition: transform 0.25s ease;
+      color: var(--text-disabled);
+    }
+    .history-row.expanded .chevron-icon {
+      transform: rotate(180deg);
+      color: var(--accent);
+    }
+
+    .star-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.2s ease;
+    }
+    .star-btn:hover {
+      transform: scale(1.2);
+    }
+    .star-btn svg {
+      width: 18px;
+      height: 18px;
+    }
+
+    /* Engine Status Indicator */
+    .engine-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-top: 2px;
+      background: rgba(255, 255, 255, 0.03);
+      padding: 2px 8px;
+      border-radius: 20px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      transition: all 0.3s ease;
+    }
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      box-shadow: 0 0 8px var(--text-muted);
+      transition: all 0.3s ease;
+    }
+    /* States */
+    .engine-status.recording {
+      color: #f87171;
+      background: rgba(239, 68, 68, 0.08);
+      border-color: rgba(239, 68, 68, 0.15);
+    }
+    .engine-status.recording .status-dot {
+      background: #ef4444;
+      box-shadow: 0 0 8px #ef4444;
+      animation: pulse 1.5s infinite;
+    }
+    .engine-status.processing {
+      color: #fbbf24;
+      background: rgba(251, 191, 36, 0.08);
+      border-color: rgba(251, 191, 36, 0.15);
+    }
+    .engine-status.processing .status-dot {
+      background: #f59e0b;
+      box-shadow: 0 0 8px #f59e0b;
+    }
+    .engine-status.injecting {
+      color: #34d399;
+      background: rgba(52, 211, 153, 0.08);
+      border-color: rgba(52, 211, 153, 0.15);
+    }
+    .engine-status.injecting .status-dot {
+      background: #10b981;
+      box-shadow: 0 0 8px #10b981;
+    }
+    @keyframes pulse {
+      0% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.3); opacity: 0.5; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+
+    /* Toast Notification System */
+    .toast-container {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      z-index: 1000;
+      pointer-events: none;
+    }
+    .toast {
+      background: rgba(15, 17, 26, 0.95);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 12px 20px;
+      color: var(--text-main);
+      font-size: 13px;
+      font-weight: 550;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+      backdrop-filter: blur(10px);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      transform: translateY(20px);
+      opacity: 0;
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      pointer-events: auto;
+      min-width: 250px;
+    }
+    .toast.active {
+      transform: translateY(0);
+      opacity: 1;
+    }
+    .toast-icon {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+    .toast-success .toast-icon { background: var(--success); box-shadow: 0 0 8px var(--success); }
+    .toast-error .toast-icon { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+    .toast-info .toast-icon { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+    .toast-success { border-color: rgba(16, 185, 129, 0.2); }
+    .toast-error { border-color: rgba(239, 68, 68, 0.2); }
+    .toast-info { border-color: rgba(99, 102, 241, 0.2); }
   </style>
 </head>
 <body>
+  <!-- Toast Container -->
+  <div class="toast-container" id="toast-container"></div>
+
   <!-- Sidebar -->
   <aside class="sidebar">
     <div class="logo-section">
       <div class="logo-badge">V3</div>
-      <div class="logo-name">VillFlow</div>
+      <div style="display: flex; flex-direction: column;">
+        <div class="logo-name">VillFlow</div>
+        <div class="engine-status" id="engine-status-badge">
+          <span class="status-dot"></span>
+          <span class="status-text">Idle</span>
+        </div>
+      </div>
     </div>
     <ul class="nav-list">
       <li class="nav-item active" data-tab="general">General</li>
@@ -707,7 +944,7 @@
         <div class="form-group">
           <label for="dict-audio-device">Active Microphone</label>
           <select id="dict-audio-device">
-            <option value="system_default">System default</option>
+            <option value="System default">System default</option>
           </select>
         </div>
       </div>
@@ -852,7 +1089,10 @@
             <select id="groq-model">
               <option value="openai/gpt-oss-120b">openai/gpt-oss-120b (default)</option>
             </select>
-            <button class="btn" id="groq-refresh-btn" title="Refresh Live Model List">&#8635; Refresh</button>
+            <button class="btn" id="groq-refresh-btn" title="Refresh Live Model List">
+              <svg class="refresh-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+              <span class="btn-text">Refresh</span>
+            </button>
           </div>
         </div>
       </div>
@@ -948,6 +1188,9 @@
       <div id="history-container">
         <!-- History entries will be generated here -->
       </div>
+      <div style="display: flex; justify-content: center; margin-top: 16px; margin-bottom: 24px;">
+        <button class="btn btn-primary" id="history-load-more-btn" style="display: none;">Load More</button>
+      </div>
     </div>
 
     <!-- Tab 9: Insights -->
@@ -1004,7 +1247,7 @@
           Windows push-to-talk voice dictation application, designed for instant, high-quality, local-cloud integrated transcriptions.
         </p>
         <div style="font-size: 13px; color:var(--text-disabled); display: flex; flex-direction:column; gap:4px; margin: 12px 0;">
-          <span>Version 3.0.0 (MSVC Build)</span>
+          <span>Version 3.0.0-p4</span>
           <span>© 2026 VillFlow Team. All Rights Reserved.</span>
         </div>
         <div style="display:flex; gap:16px;">

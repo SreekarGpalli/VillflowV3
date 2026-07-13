@@ -13,19 +13,25 @@ const MAX_COMPLETION_TOKENS: u32 = 2048;
 ///
 /// Applied after trimming. Handles:
 /// - surrounding double or single quotes
-/// - ``` / ```lang fenced blocks
+/// - a single outer ``` / ```lang fenced block (leading *and* trailing fences only)
+///
+/// Internal code fences are preserved — we never search with `rfind`, which would
+/// truncate multi-block model output.
 pub fn clean_completion_text(raw: &str) -> String {
     let mut s = raw.trim().to_string();
 
-    // Strip markdown code fences (```lang\n...\n``` or ```\n...\n```)
-    if s.starts_with("```") {
-        if let Some(rest) = s.strip_prefix("```") {
-            let rest = rest.trim_start_matches(|c: char| c != '\n').trim_start_matches('\n');
-            if let Some(end) = rest.rfind("```") {
-                s = rest[..end].trim().to_string();
-            } else {
-                s = rest.trim().to_string();
-            }
+    // Only strip when the *entire* response is wrapped in one fence pair.
+    if s.starts_with("```") && s.ends_with("```") && s.len() >= 6 {
+        // Drop trailing fence.
+        let without_close = s[..s.len() - 3].trim_end();
+        // Drop opening fence (+ optional language tag on the same / first line).
+        if let Some(rest) = without_close.strip_prefix("```") {
+            s = match rest.find('\n') {
+                // ```lang\n...\n```  or  ```\n...\n```
+                Some(nl) => rest[nl + 1..].trim().to_string(),
+                // ```content``` on one line
+                None => rest.trim().to_string(),
+            };
         }
     }
 
@@ -211,6 +217,22 @@ mod tests {
             clean_completion_text("```text\nhello world\n```"),
             "hello world"
         );
+        assert_eq!(clean_completion_text("```hello```"), "hello");
+    }
+
+    #[test]
+    fn clean_preserves_internal_fences() {
+        // Multi-block output must not be truncated at an inner ```.
+        let multi = "Intro:\n\n```python\nprint(1)\n```\n\nOutro.";
+        assert_eq!(clean_completion_text(multi), multi);
+
+        // Leading fence without a matching trailing fence → leave untouched.
+        let unclosed = "```\npartial only";
+        assert_eq!(clean_completion_text(unclosed), unclosed);
+
+        // Outer wrap with an inner fence still yields the full inner body.
+        let wrapped = "```\nSee:\n```js\nx()\n```\ndone\n```";
+        assert_eq!(clean_completion_text(wrapped), "See:\n```js\nx()\n```\ndone");
     }
 
     #[test]

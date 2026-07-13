@@ -11,17 +11,17 @@ use vf_core::{DictEntry, HistoryEntry, InsightsSummary, Settings, Store, EngineE
 use vf_engine::EngineHandle;
 use vf_store::SqliteStore;
 
+pub struct AppSettings(pub std::sync::Mutex<Settings>);
+
 #[tauri::command]
-fn get_settings() -> Result<Settings, String> {
-    let settings_path = vf_store::get_default_settings_path()
-        .ok_or_else(|| "Could not resolve settings path".to_string())?;
-    vf_store::load_settings(&settings_path)
-        .map_err(|e| e.to_string())
+fn get_settings(settings_state: State<'_, AppSettings>) -> Result<Settings, String> {
+    Ok(settings_state.0.lock().unwrap().clone())
 }
 
 #[tauri::command]
 fn save_settings(
     settings: Settings,
+    settings_state: State<'_, AppSettings>,
     _store: State<'_, Arc<SqliteStore>>,
     engine: State<'_, EngineHandle>,
 ) -> Result<(), String> {
@@ -29,6 +29,9 @@ fn save_settings(
         .ok_or_else(|| "Could not resolve settings path".to_string())?;
     vf_store::save_settings(&settings, &settings_path)
         .map_err(|e| e.to_string())?;
+    
+    // Update cached settings in Tauri state
+    *settings_state.0.lock().unwrap() = settings.clone();
     
     // Apply changes to the engine
     engine
@@ -39,35 +42,24 @@ fn save_settings(
 }
 
 #[tauri::command]
-async fn list_groq_models() -> Result<Vec<String>, String> {
-    let settings_path = vf_store::get_default_settings_path()
-        .ok_or_else(|| "Could not resolve settings path".to_string())?;
-    let settings = vf_store::load_settings(&settings_path)
-        .map_err(|e| e.to_string())?;
+async fn list_groq_models(settings_state: State<'_, AppSettings>) -> Result<Vec<String>, String> {
+    let api_key = {
+        let settings = settings_state.0.lock().unwrap();
+        settings.llm.api_key.clone()
+    };
     
-    if settings.llm.api_key.trim().is_empty() {
+    if api_key.trim().is_empty() {
         return Err("LLM API key is empty".to_string());
     }
 
-    vf_cloud::list_models(&settings.llm.api_key)
+    vf_cloud::list_models(&api_key)
         .await
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn list_input_devices() -> Result<Vec<String>, String> {
-    use cpal::traits::{DeviceTrait, HostTrait};
-    let host = cpal::default_host();
-    let devices = host.input_devices()
-        .map_err(|e| format!("Failed to get input devices: {e}"))?;
-    
-    let mut names = vec!["system_default".to_string()];
-    for device in devices {
-        if let Ok(name) = device.name() {
-            names.push(name);
-        }
-    }
-    Ok(names)
+    vf_engine::list_input_devices().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -170,6 +162,8 @@ fn autostart_status() -> Result<bool, String> {
 }
 
 fn main() {
+    env_logger::init();
+
     let db_path = vf_store::get_default_db_path().expect("Could not resolve default DB path");
     let store = vf_store::SqliteStore::new(&db_path).expect("Failed to initialize SqliteStore");
     let store_state = Arc::new(store);
@@ -182,10 +176,13 @@ fn main() {
     let engine_handle_for_setup = engine_handle.subscribe();
     let engine_handle_for_state = engine_handle;
 
+    let app_settings = AppSettings(std::sync::Mutex::new(settings));
+
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .manage(store_state)
         .manage(engine_handle_for_state)
+        .manage(app_settings)
         .setup(move |app| {
             let app_handle = app.handle().clone();
 
@@ -245,13 +242,13 @@ fn main() {
 
             // 4. Handle start_minimized configuration
             let main_window = app.get_webview_window("main").unwrap();
-            let settings_path = vf_store::get_default_settings_path().expect("Could not resolve default Settings path");
-            if let Ok(settings) = vf_store::load_settings(&settings_path) {
-                if settings.general.start_minimized {
-                    let _ = main_window.hide();
-                } else {
-                    let _ = main_window.show();
-                }
+            let app_settings_state = app.state::<AppSettings>();
+            let start_min = {
+                let s = app_settings_state.0.lock().unwrap();
+                s.general.start_minimized
+            };
+            if start_min {
+                let _ = main_window.hide();
             } else {
                 let _ = main_window.show();
             }
@@ -280,20 +277,21 @@ fn main() {
                             }
 
                             // Desktop Notification
-                            let settings_path = vf_store::get_default_settings_path();
-                            if let Some(path) = settings_path {
-                                if let Ok(settings) = vf_store::load_settings(&path) {
-                                    if settings.general.show_error_notifications {
-                                        let _ = app_handle.notification()
-                                            .builder()
-                                            .title("VillFlow Error")
-                                            .body(&err_msg)
-                                            .show();
-                                    }
-                                }
+                            let show_notif = {
+                                let s = app_handle.state::<AppSettings>();
+                                let val = s.0.lock().unwrap().general.show_error_notifications;
+                                val
+                            };
+                            if show_notif {
+                                let _ = app_handle.notification()
+                                    .builder()
+                                    .title("VillFlow Error")
+                                    .body(&err_msg)
+                                    .show();
                             }
                         }
                         EngineEvent::ToggleScratchpad => {
+                            let _ = app_handle.emit("scratchpad-toggle", ());
                             if let Some(scratchpad_window) = app_handle.get_webview_window("scratchpad") {
                                 if let Ok(visible) = scratchpad_window.is_visible() {
                                     if visible {
@@ -318,6 +316,7 @@ fn main() {
                 let _ = window.hide();
             }
         })
+        .on_menu_event(|_, _| {}) // satisfies callback requirement if needed
         .invoke_handler(tauri::generate_handler![
             get_settings,
             save_settings,

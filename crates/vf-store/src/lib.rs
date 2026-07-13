@@ -149,10 +149,9 @@ impl Store for SqliteStore {
 
     fn dictionary_add(&self, word: &str, source: &str) -> anyhow::Result<DictEntry> {
         let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("DB Mutex poisoned"))?;
-        let now_str = chrono::Local::now().to_rfc3339();
         conn.execute(
-            "INSERT INTO dictionary (word, source, created_at) VALUES (?, ?, ?)",
-            rusqlite::params![word, source, now_str],
+            "INSERT INTO dictionary (word, source, created_at) VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'))",
+            rusqlite::params![word, source],
         )?;
         let id = conn.last_insert_rowid();
         Ok(DictEntry {
@@ -189,7 +188,7 @@ impl Store for SqliteStore {
         let mut conn = self.conn.lock().map_err(|_| anyhow::anyhow!("DB Mutex poisoned"))?;
         let tx = conn.transaction()?;
         {
-            let mut stmt = tx.prepare("UPDATE dictionary SET use_count = use_count + 1 WHERE word = ?")?;
+            let mut stmt = tx.prepare("UPDATE dictionary SET use_count = use_count + 1 WHERE word = ? COLLATE NOCASE")?;
             for word in words {
                 stmt.execute(rusqlite::params![word])?;
             }
@@ -200,25 +199,36 @@ impl Store for SqliteStore {
 
     fn history_append(&self, entry: &HistoryEntry) -> anyhow::Result<()> {
         let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("DB Mutex poisoned"))?;
-        let ts = if entry.ts.is_empty() {
-            chrono::Local::now().to_rfc3339()
+        if entry.ts.is_empty() {
+            conn.execute(
+                "INSERT INTO history (ts, app_name, window_title, mode, raw_transcript, final_text, duration_ms, word_count) 
+                 VALUES (strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'), ?, ?, ?, ?, ?, ?, ?)",
+                rusqlite::params![
+                    entry.app_name,
+                    entry.window_title,
+                    entry.mode,
+                    entry.raw_transcript,
+                    entry.final_text,
+                    entry.duration_ms,
+                    entry.word_count,
+                ],
+            )?;
         } else {
-            entry.ts.clone()
-        };
-        conn.execute(
-            "INSERT INTO history (ts, app_name, window_title, mode, raw_transcript, final_text, duration_ms, word_count) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            rusqlite::params![
-                ts,
-                entry.app_name,
-                entry.window_title,
-                entry.mode,
-                entry.raw_transcript,
-                entry.final_text,
-                entry.duration_ms,
-                entry.word_count,
-            ],
-        )?;
+            conn.execute(
+                "INSERT INTO history (ts, app_name, window_title, mode, raw_transcript, final_text, duration_ms, word_count) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                rusqlite::params![
+                    entry.ts,
+                    entry.app_name,
+                    entry.window_title,
+                    entry.mode,
+                    entry.raw_transcript,
+                    entry.final_text,
+                    entry.duration_ms,
+                    entry.word_count,
+                ],
+            )?;
+        }
         Ok(())
     }
 
@@ -260,10 +270,9 @@ impl Store for SqliteStore {
 
     fn scratchpad_set(&self, content: &str) -> anyhow::Result<()> {
         let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("DB Mutex poisoned"))?;
-        let now_str = chrono::Local::now().to_rfc3339();
         conn.execute(
-            "INSERT OR REPLACE INTO scratchpad (id, content, updated_at) VALUES (1, ?, ?)",
-            rusqlite::params![content, now_str],
+            "INSERT OR REPLACE INTO scratchpad (id, content, updated_at) VALUES (1, ?, strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'))",
+            rusqlite::params![content],
         )?;
         Ok(())
     }
@@ -273,7 +282,7 @@ impl Store for SqliteStore {
         
         // 1. Total words
         let total_words: Option<i64> = conn.query_row(
-            "SELECT SUM(word_count) FROM history",
+            "SELECT SUM(word_count) FROM history WHERE mode = 'dictation'",
             [],
             |row| row.get(0),
         )?;
@@ -316,15 +325,14 @@ impl Store for SqliteStore {
         }
         
         // 4. Daily words (last 365 days)
-        let cutoff_date = (chrono::Local::now() - chrono::Duration::days(365)).format("%Y-%m-%d").to_string();
         let mut stmt_daily = conn.prepare(
             "SELECT SUBSTR(ts, 1, 10) as day, SUM(word_count) 
              FROM history 
-             WHERE SUBSTR(ts, 1, 10) >= ? 
+             WHERE SUBSTR(ts, 1, 10) >= date('now', 'localtime', '-365 days') 
              GROUP BY day 
              ORDER BY day ASC"
         )?;
-        let daily_rows = stmt_daily.query_map(rusqlite::params![cutoff_date], |row| {
+        let daily_rows = stmt_daily.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
         })?;
         let mut daily_words = Vec::new();
@@ -473,8 +481,8 @@ mod tests {
         assert_eq!(history[1].mode, "dictation");
 
         let insights = store.insights_summary().expect("Failed to get insights");
-        // total_words = 1 + 3 + 3 = 7
-        assert_eq!(insights.total_words, 7);
+        // total_words = 1 + 3 = 4
+        assert_eq!(insights.total_words, 4);
         // avg_wpm:
         // dictation rows word count = 1 + 3 = 4
         // dictation rows duration = 1000 + 2000 = 3000 ms = 3.0 seconds = 0.05 minutes
