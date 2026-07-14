@@ -4,26 +4,28 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tauri::State;
-use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 use tauri_plugin_notification::NotificationExt;
-use vf_core::{DictEntry, HistoryEntry, InsightsSummary, Settings, Store, EngineEvent};
+use vf_core::{
+    DictEntry, EngineEvent, HistoryEntry, InsightsSummary, Settings, Store,
+};
 use vf_engine::EngineHandle;
 use vf_store::SqliteStore;
 
 pub struct AppSettings(pub std::sync::Mutex<Settings>);
 
-/// Tracks whether we believe the Scratchpad is open, plus debounce for the hotkey.
-/// `is_visible()` alone is flaky with always-on-top / hide-to-tray windows.
+/// Tracks whether the Scratchpad should be considered open.
+/// We intentionally do NOT trust `is_visible()` alone — it lies for
+/// always-on-top / hide-to-tray windows on Windows.
 pub struct ScratchpadUi {
     open: AtomicBool,
     last_toggle: std::sync::Mutex<Option<Instant>>,
 }
 
-impl ScratchpadUi {
-    fn new() -> Self {
+impl Default for ScratchpadUi {
+    fn default() -> Self {
         Self {
             open: AtomicBool::new(false),
             last_toggle: std::sync::Mutex::new(None),
@@ -31,42 +33,59 @@ impl ScratchpadUi {
     }
 }
 
-/// Show or hide the Scratchpad reliably (hotkey + tray share this path).
+/// Show or hide the Scratchpad. Shared by hotkey + tray.
 fn toggle_scratchpad_window(app: &AppHandle) {
     let Some(win) = app.get_webview_window("scratchpad") else {
+        log::error!("scratchpad window missing");
         return;
     };
     let ui = app.state::<ScratchpadUi>();
 
-    // Debounce rapid re-fires (key repeat / dual event paths).
+    // Short debounce only (key-repeat protection). 120ms is enough; 350ms felt
+    // like a "broken" hotkey when users double-tapped quickly.
     {
         let mut last = ui.last_toggle.lock().unwrap();
         let now = Instant::now();
         if let Some(t) = *last {
-            if now.duration_since(t) < Duration::from_millis(350) {
+            if now.duration_since(t) < Duration::from_millis(120) {
                 return;
             }
         }
         *last = Some(now);
     }
 
+    // Pure flip of our flag — ignore flaky is_visible for the decision.
     let currently_open = ui.open.load(Ordering::SeqCst);
-    // Also trust the OS if our flag drifted (e.g. user closed via X → hide).
-    let os_visible = win.is_visible().unwrap_or(false) && !win.is_minimized().unwrap_or(false);
-    let open = currently_open || os_visible;
 
-    if open {
+    if currently_open {
         let _ = win.hide();
         ui.open.store(false, Ordering::SeqCst);
+        log::info!("scratchpad: hide");
     } else {
         let _ = win.unminimize();
-        let _ = win.show();
+        if let Err(e) = win.show() {
+            log::error!("scratchpad show failed: {e}");
+        }
         let _ = win.set_always_on_top(true);
         let _ = win.set_focus();
         ui.open.store(true, Ordering::SeqCst);
-        // Tell the webview to focus the editor caret.
+        // Focus the contenteditable after the window is up.
         let _ = win.emit("scratchpad-focus", ());
+        log::info!("scratchpad: show");
     }
+}
+
+/// Deliver dictation text into our WebViews (Scratchpad / main).
+fn emit_app_insert(app: &AppHandle, text: &str) {
+    // Target windows explicitly — more reliable than a global emit alone.
+    if let Some(w) = app.get_webview_window("scratchpad") {
+        let _ = w.emit("app-insert", text);
+    }
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.emit("app-insert", text);
+    }
+    // Also global, for any other listeners.
+    let _ = app.emit("app-insert", text);
 }
 
 #[tauri::command]
@@ -83,17 +102,14 @@ fn save_settings(
 ) -> Result<(), String> {
     let settings_path = vf_store::get_default_settings_path()
         .ok_or_else(|| "Could not resolve settings path".to_string())?;
-    vf_store::save_settings(&settings, &settings_path)
-        .map_err(|e| e.to_string())?;
-    
-    // Update cached settings in Tauri state
+    vf_store::save_settings(&settings, &settings_path).map_err(|e| e.to_string())?;
+
     *settings_state.0.lock().unwrap() = settings.clone();
-    
-    // Apply changes to the engine
+
     engine
         .send(vf_core::EngineCmd::ApplySettings(Box::new(settings)))
         .map_err(|e| e.to_string())?;
-    
+
     Ok(())
 }
 
@@ -103,7 +119,7 @@ async fn list_groq_models(settings_state: State<'_, AppSettings>) -> Result<Vec<
         let settings = settings_state.0.lock().unwrap();
         settings.llm.api_key.clone()
     };
-    
+
     if api_key.trim().is_empty() {
         return Err("LLM API key is empty".to_string());
     }
@@ -124,12 +140,20 @@ fn dictionary_list(store: State<'_, Arc<SqliteStore>>) -> Result<Vec<DictEntry>,
 }
 
 #[tauri::command]
-fn dictionary_add(word: String, source: String, store: State<'_, Arc<SqliteStore>>) -> Result<DictEntry, String> {
+fn dictionary_add(
+    word: String,
+    source: String,
+    store: State<'_, Arc<SqliteStore>>,
+) -> Result<DictEntry, String> {
     store.dictionary_add(&word, &source).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn dictionary_update(id: i64, word: String, store: State<'_, Arc<SqliteStore>>) -> Result<(), String> {
+fn dictionary_update(
+    id: i64,
+    word: String,
+    store: State<'_, Arc<SqliteStore>>,
+) -> Result<(), String> {
     store.dictionary_update(id, &word).map_err(|e| e.to_string())
 }
 
@@ -144,7 +168,11 @@ fn dictionary_toggle_star(id: i64, store: State<'_, Arc<SqliteStore>>) -> Result
 }
 
 #[tauri::command]
-fn history_list(limit: u32, offset: u32, store: State<'_, Arc<SqliteStore>>) -> Result<Vec<HistoryEntry>, String> {
+fn history_list(
+    limit: u32,
+    offset: u32,
+    store: State<'_, Arc<SqliteStore>>,
+) -> Result<Vec<HistoryEntry>, String> {
     store.history_list(limit, offset).map_err(|e| e.to_string())
 }
 
@@ -189,22 +217,23 @@ fn reset_prompt(name: String) -> Result<String, String> {
 fn set_autostart(enabled: bool) -> Result<(), String> {
     use winreg::enums::*;
     use winreg::RegKey;
-    
+
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let path = r"Software\Microsoft\Windows\CurrentVersion\Run";
-    
+
     if enabled {
         let current_exe = std::env::current_exe()
             .map_err(|e| format!("Failed to get current exe path: {e}"))?;
-        // Quote the path so spaces in Program Files etc. work under Run.
         let val = format!("\"{}\"", current_exe.display());
-        
-        let (key, _) = hkcu.create_subkey(path)
+
+        let (key, _) = hkcu
+            .create_subkey(path)
             .map_err(|e| format!("Failed to open registry key: {e}"))?;
         key.set_value("VillFlow", &val)
             .map_err(|e| format!("Failed to write registry value: {e}"))?;
     } else {
-        let key = hkcu.open_subkey_with_flags(path, KEY_WRITE)
+        let key = hkcu
+            .open_subkey_with_flags(path, KEY_WRITE)
             .map_err(|e| format!("Failed to open registry key for writing: {e}"))?;
         let _ = key.delete_value("VillFlow");
     }
@@ -215,15 +244,15 @@ fn set_autostart(enabled: bool) -> Result<(), String> {
 fn autostart_status() -> Result<bool, String> {
     use winreg::enums::*;
     use winreg::RegKey;
-    
+
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let path = r"Software\Microsoft\Windows\CurrentVersion\Run";
-    
+
     let key = match hkcu.open_subkey_with_flags(path, KEY_READ) {
         Ok(k) => k,
         Err(_) => return Ok(false),
     };
-    
+
     let value: Result<String, _> = key.get_value("VillFlow");
     Ok(value.is_ok())
 }
@@ -235,10 +264,10 @@ fn main() {
     let store = vf_store::SqliteStore::new(&db_path).expect("Failed to initialize SqliteStore");
     let store_state = Arc::new(store);
 
-    let settings_path = vf_store::get_default_settings_path().expect("Could not resolve default Settings path");
+    let settings_path =
+        vf_store::get_default_settings_path().expect("Could not resolve default Settings path");
     let settings = vf_store::load_settings(&settings_path).expect("Failed to load settings");
 
-    // Spawn engine
     let engine_handle = vf_engine::spawn(settings.clone(), store_state.clone() as Arc<dyn Store>);
     let engine_handle_for_setup = engine_handle.subscribe();
     let engine_handle_for_state = engine_handle;
@@ -250,17 +279,17 @@ fn main() {
         .manage(store_state)
         .manage(engine_handle_for_state)
         .manage(app_settings)
-        .manage(ScratchpadUi::new())
+        .manage(ScratchpadUi::default())
         .setup(move |app| {
             let app_handle = app.handle().clone();
 
-            // 1. Build Tray Menu
-            let open_main = MenuItem::with_id(app, "open_main", "Open VillFlow", true, None::<&str>)?;
-            let toggle_scratch = MenuItem::with_id(app, "toggle_scratch", "Scratchpad", true, None::<&str>)?;
+            let open_main =
+                MenuItem::with_id(app, "open_main", "Open VillFlow", true, None::<&str>)?;
+            let toggle_scratch =
+                MenuItem::with_id(app, "toggle_scratch", "Scratchpad", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let tray_menu = Menu::with_items(app, &[&open_main, &toggle_scratch, &quit])?;
 
-            // 2. Build Tray Icon using the compiled PNG asset
             let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))
                 .expect("Failed to load 32x32.png icon");
 
@@ -270,7 +299,11 @@ fn main() {
                 .tooltip("VillFlow - Idle")
                 .show_menu_on_left_click(false)
                 .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click { button: tauri::tray::MouseButton::Left, .. } = event {
+                    if let TrayIconEvent::Click {
+                        button: tauri::tray::MouseButton::Left,
+                        ..
+                    } = event
+                    {
                         let app = tray.app_handle();
                         if let Some(main_window) = app.get_webview_window("main") {
                             let _ = main_window.show();
@@ -280,31 +313,26 @@ fn main() {
                 })
                 .build(app)?;
 
-            // 3. Register Tray Menu click handler
-            app.on_menu_event(move |app, event| {
-                match event.id.as_ref() {
-                    "open_main" => {
-                        if let Some(main_window) = app.get_webview_window("main") {
-                            let _ = main_window.show();
-                            let _ = main_window.set_focus();
-                        }
+            app.on_menu_event(move |app, event| match event.id.as_ref() {
+                "open_main" => {
+                    if let Some(main_window) = app.get_webview_window("main") {
+                        let _ = main_window.show();
+                        let _ = main_window.set_focus();
                     }
-                    "toggle_scratch" => {
-                        toggle_scratchpad_window(app);
-                    }
-                    "quit" => {
-                        if let Some(engine) = app.try_state::<EngineHandle>() {
-                            let _ = engine.send(vf_core::EngineCmd::Shutdown);
-                        }
-                        // Brief pause so the engine can unhook before process exit.
-                        std::thread::sleep(std::time::Duration::from_millis(150));
-                        app.exit(0);
-                    }
-                    _ => {}
                 }
+                "toggle_scratch" => {
+                    toggle_scratchpad_window(app);
+                }
+                "quit" => {
+                    if let Some(engine) = app.try_state::<EngineHandle>() {
+                        let _ = engine.send(vf_core::EngineCmd::Shutdown);
+                    }
+                    std::thread::sleep(Duration::from_millis(150));
+                    app.exit(0);
+                }
+                _ => {}
             });
 
-            // 4. Handle start_minimized configuration
             let main_window = app.get_webview_window("main").unwrap();
             let app_settings_state = app.state::<AppSettings>();
             let start_min = {
@@ -317,37 +345,51 @@ fn main() {
                 let _ = main_window.show();
             }
 
-            // 5. Asynchronously bridge engine events
+            // Pre-warm Scratchpad webview so listeners are registered before first use.
+            if let Some(sp) = app.get_webview_window("scratchpad") {
+                // Show briefly off-logic: ensure page loads while still "closed".
+                // Just accessing the window is enough if it was created at startup;
+                // emit a no-op to force webview wake on some Windows builds.
+                let _ = sp.eval("void 0");
+            }
+
             let mut rx = engine_handle_for_setup;
             tauri::async_runtime::spawn(async move {
                 while let Ok(event) = rx.recv().await {
                     match event {
                         EngineEvent::State(state) => {
-                            let _ = app_handle.emit("engine-state", state);
+                            // Emit a plain string so every frontend gets "Recording" etc.
+                            let state_str = match state {
+                                vf_core::EngineState::Idle => "Idle",
+                                vf_core::EngineState::Recording => "Recording",
+                                vf_core::EngineState::Processing => "Processing",
+                                vf_core::EngineState::Injecting => "Injecting",
+                            };
+                            let _ = app_handle.emit("engine-state", state_str);
+                            // Also target Scratchpad directly (always-on-top window).
+                            if let Some(sp) = app_handle.get_webview_window("scratchpad") {
+                                let _ = sp.emit("engine-state", state_str);
+                            }
                             if let Some(tray) = app_handle.tray_by_id("main_tray") {
-                                let tooltip = match state {
-                                    vf_core::EngineState::Idle => "VillFlow - Idle",
-                                    vf_core::EngineState::Recording => "VillFlow - Recording",
-                                    vf_core::EngineState::Processing => "VillFlow - Processing",
-                                    vf_core::EngineState::Injecting => "VillFlow - Injecting",
-                                };
-                                let _ = tray.set_tooltip(Some(tooltip));
+                                let tooltip = format!("VillFlow - {state_str}");
+                                let _ = tray.set_tooltip(Some(tooltip.as_str()));
                             }
                         }
                         EngineEvent::Error(err_msg) => {
                             let _ = app_handle.emit("engine-error", err_msg.clone());
                             if let Some(tray) = app_handle.tray_by_id("main_tray") {
-                                let _ = tray.set_tooltip(Some(&format!("VillFlow Error: {err_msg}")));
+                                let _ =
+                                    tray.set_tooltip(Some(&format!("VillFlow Error: {err_msg}")));
                             }
 
-                            // Desktop Notification
                             let show_notif = {
                                 let s = app_handle.state::<AppSettings>();
                                 let val = s.0.lock().unwrap().general.show_error_notifications;
                                 val
                             };
                             if show_notif {
-                                let _ = app_handle.notification()
+                                let _ = app_handle
+                                    .notification()
                                     .builder()
                                     .title("VillFlow Error")
                                     .body(&err_msg)
@@ -358,10 +400,8 @@ fn main() {
                             toggle_scratchpad_window(&app_handle);
                         }
                         EngineEvent::AppInsert { text } => {
-                            // Broadcast to all webviews; the focused editable
-                            // field (Scratchpad editor, or a settings control)
-                            // applies it. WebView2 cannot take SendInput paste.
-                            let _ = app_handle.emit("app-insert", text);
+                            log::info!("app-insert: {} chars", text.chars().count());
+                            emit_app_insert(&app_handle, &text);
                         }
                         _ => {}
                     }
@@ -374,7 +414,6 @@ fn main() {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.hide();
-                // Keep ScratchpadUi flag in sync when user closes via the X button.
                 if window.label() == "scratchpad" {
                     if let Some(ui) = window.try_state::<ScratchpadUi>() {
                         ui.open.store(false, Ordering::SeqCst);

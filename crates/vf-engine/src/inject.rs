@@ -10,14 +10,16 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
     KEYEVENTF_UNICODE, VIRTUAL_KEY, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT, VK_V,
 };
-use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId,
+};
 
 /// How text was (or should be) delivered after [`inject_text`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InjectOutcome {
     /// Sent via clipboard paste or SendInput to an external app.
     External,
-    /// Foreground window is VillFlow itself — shell must deliver via frontend.
+    /// Foreground is a VillFlow window — shell must deliver via frontend event.
     InApp,
 }
 
@@ -32,14 +34,11 @@ pub fn inject_text(
     restore_clipboard: bool,
 ) -> anyhow::Result<InjectOutcome> {
     // The user may still be holding Ctrl/Shift from the push-to-talk chord.
-    // Injecting Ctrl+V (or typing) under held modifiers turns it into e.g.
-    // Ctrl+Shift+V inside the target app — wait for release, then force-clear
-    // anything still held.
     settle_modifiers(Duration::from_millis(800));
 
     if foreground_is_self() {
         force_release_all_modifiers();
-        log::debug!("inject: foreground is VillFlow — using in-app delivery");
+        log::info!("inject: VillFlow window focused — in-app delivery");
         return Ok(InjectOutcome::InApp);
     }
 
@@ -47,13 +46,12 @@ pub fn inject_text(
         InjectionMethod::ClipboardPaste => inject_clipboard_paste(text, restore_clipboard),
         InjectionMethod::SendInputTyping => inject_sendinput_typing(text),
     };
-    // Leave the OS with a clean modifier state so mouse/keyboard feel normal
-    // after dictation (no phantom Shift+click).
     force_release_all_modifiers();
     result.map(|_| InjectOutcome::External)
 }
 
-/// True when the foreground window is owned by this process (Scratchpad, main UI).
+/// True when the foreground top-level window is owned by this process, or its
+/// title looks like a VillFlow window (Scratchpad / main).
 pub fn foreground_is_self() -> bool {
     unsafe {
         let hwnd = GetForegroundWindow();
@@ -62,10 +60,20 @@ pub fn foreground_is_self() -> bool {
         }
         let mut pid = 0u32;
         GetWindowThreadProcessId(hwnd, Some(&mut pid));
-        if pid == 0 {
-            return false;
+        if pid != 0 && pid == GetCurrentProcessId() {
+            return true;
         }
-        pid == GetCurrentProcessId()
+        // Fallback: title match (defensive if PID plumbing ever differs).
+        let mut buf = [0u16; 256];
+        let len = GetWindowTextW(hwnd, &mut buf);
+        if len > 0 {
+            let title = String::from_utf16_lossy(&buf[..len as usize]);
+            let t = title.to_ascii_lowercase();
+            if t.contains("scratchpad") || t == "villflow" || t.starts_with("villflow ") {
+                return true;
+            }
+        }
+        false
     }
 }
 
@@ -74,7 +82,6 @@ pub fn force_release_all_modifiers() {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_RCONTROL, VK_RMENU, VK_RSHIFT,
     };
-    // Generic + left/right so neither side of a chord can stick.
     const MODS: [VIRTUAL_KEY; 11] = [
         VK_CONTROL,
         VK_LCONTROL,
@@ -94,7 +101,6 @@ pub fn force_release_all_modifiers() {
     }
 }
 
-/// Physical modifiers currently reported down by the OS.
 fn modifiers_physically_down() -> Vec<VIRTUAL_KEY> {
     const MODS: [VIRTUAL_KEY; 5] = [VK_CONTROL, VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN];
     MODS.iter()
@@ -103,10 +109,6 @@ fn modifiers_physically_down() -> Vec<VIRTUAL_KEY> {
         .collect()
 }
 
-/// Wait (bounded) for the push-to-talk modifiers to be physically released;
-/// if any are still held at the deadline, synthesize key-ups so the injected
-/// input sequence starts from a clean modifier state. A later physical release
-/// just produces a redundant key-up, which is harmless.
 fn settle_modifiers(max_wait: Duration) {
     let deadline = Instant::now() + max_wait;
     while Instant::now() < deadline {
@@ -118,13 +120,14 @@ fn settle_modifiers(max_wait: Duration) {
     let held = modifiers_physically_down();
     if !held.is_empty() {
         let ups: Vec<INPUT> = held.into_iter().map(|vk| key_input(vk, true)).collect();
-        unsafe { SendInput(&ups, std::mem::size_of::<INPUT>() as i32) };
+        unsafe {
+            let _ = SendInput(&ups, std::mem::size_of::<INPUT>() as i32);
+        }
         thread::sleep(Duration::from_millis(10));
     }
 }
 
 fn inject_clipboard_paste(text: &str, restore_clipboard: bool) -> anyhow::Result<()> {
-    // (external apps only — see InjectOutcome::InApp for our WebViews)
     let mut clip = Clipboard::new()?;
     let previous = if restore_clipboard {
         clip.get_text().ok()
@@ -133,10 +136,8 @@ fn inject_clipboard_paste(text: &str, restore_clipboard: bool) -> anyhow::Result
     };
 
     clip.set_text(text.to_string())?;
-    // Small delay so the target app sees the new clipboard.
     thread::sleep(Duration::from_millis(15));
     send_ctrl_v()?;
-    // Settle before restore.
     thread::sleep(Duration::from_millis(80));
 
     if restore_clipboard {
@@ -156,7 +157,6 @@ fn inject_sendinput_typing(text: &str) -> anyhow::Result<()> {
     for ch in text.encode_utf16() {
         send_unicode(ch, false)?;
         send_unicode(ch, true)?;
-        // Tiny pacing so some hosts do not drop unicode input bursts.
         thread::sleep(Duration::from_millis(1));
     }
     Ok(())

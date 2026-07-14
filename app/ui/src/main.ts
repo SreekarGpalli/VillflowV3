@@ -1083,9 +1083,14 @@ async function setupEngineEventListeners() {
         showToast(`Engine Error: ${errMsg}`, "error");
       });
 
-      // Dictation into Settings fields when this window is focused.
-      await listen<string>("app-insert", (event) => {
-        if (!document.hasFocus()) return;
+      // Dictation into Settings fields only when *this* window is focused.
+      await listen<string>("app-insert", async (event) => {
+        try {
+          const { getCurrentWindow } = await import("@tauri-apps/api/window");
+          if (!(await getCurrentWindow().isFocused())) return;
+        } catch {
+          if (!document.hasFocus()) return;
+        }
         const text = event.payload ?? "";
         if (!text) return;
         const el = document.activeElement as HTMLElement | null;

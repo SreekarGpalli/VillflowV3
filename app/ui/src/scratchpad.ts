@@ -22,14 +22,12 @@ function sanitizeHtml(html: string): string {
       if (child.nodeType === Node.ELEMENT_NODE) {
         const el = child as HTMLElement;
         if (!ALLOWED_TAGS.has(el.tagName)) {
-          // Unwrap disallowed tags (keep text children).
           while (el.firstChild) {
             node.insertBefore(el.firstChild, el);
           }
           node.removeChild(el);
           continue;
         }
-        // Strip all attributes (no href/on*/style XSS vectors).
         for (const attr of Array.from(el.attributes)) {
           el.removeAttribute(attr.name);
         }
@@ -56,7 +54,7 @@ async function saveContent() {
   if (!editor || !saveStatus) return;
   saveStatus.innerText = "Saving...";
   saveStatus.className = "status-saving";
-  
+
   const content = sanitizeHtml(editor.innerHTML);
   try {
     await invoke("scratchpad_set", { content });
@@ -79,17 +77,77 @@ function triggerSave() {
   debounceTimeout = window.setTimeout(saveContent, 500);
 }
 
-function setDictationPill(state: string) {
+function normalizeState(payload: unknown): string {
+  if (typeof payload === "string") return payload;
+  if (payload && typeof payload === "object") {
+    // Defensive: if a tagged object ever arrives.
+    const keys = Object.keys(payload as object);
+    if (keys.length === 1) return keys[0];
+  }
+  return String(payload ?? "");
+}
+
+function setDictationPill(stateRaw: unknown) {
   const pill = document.getElementById("dictation-pill");
   const label = document.getElementById("dictation-pill-label");
   if (!pill || !label) return;
 
+  const state = normalizeState(stateRaw);
   pill.classList.remove("visible", "recording", "processing", "injecting");
-  const s = String(state);
-  if (s === "Recording" || s === "Processing" || s === "Injecting") {
-    pill.classList.add("visible", s.toLowerCase());
-    label.textContent = s;
+
+  if (state === "Recording" || state === "Processing" || state === "Injecting") {
+    pill.classList.add("visible", state.toLowerCase());
+    label.textContent = state;
   }
+}
+
+/**
+ * Insert dictated / command-mode text at the caret (or replace the selection).
+ */
+function insertDictatedText(text: string) {
+  if (!editor || !text) return;
+
+  try {
+    editor.focus();
+  } catch {
+    /* ignore */
+  }
+
+  let inserted = false;
+  try {
+    inserted = document.execCommand("insertText", false, text);
+  } catch {
+    inserted = false;
+  }
+
+  if (!inserted) {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      const range = sel.getRangeAt(0);
+      if (editor.contains(range.commonAncestorContainer) || range.commonAncestorContainer === editor) {
+        range.deleteContents();
+        const node = document.createTextNode(text);
+        range.insertNode(node);
+        range.setStartAfter(node);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        inserted = true;
+      }
+    }
+  }
+
+  if (!inserted) {
+    // Absolute fallback: append at end of editor.
+    if (editor.lastChild && editor.lastChild.nodeType === Node.TEXT_NODE) {
+      editor.lastChild.textContent = (editor.lastChild.textContent || "") + text;
+    } else {
+      editor.appendChild(document.createTextNode(text));
+    }
+  }
+
+  updateWordCount(editor.innerText || "");
+  triggerSave();
 }
 
 async function init() {
@@ -99,7 +157,6 @@ async function init() {
 
   if (!editor) return;
 
-  // Initialize toolbar buttons
   document.getElementById("btn-bold")?.addEventListener("click", () => {
     document.execCommand("bold", false);
     editor?.focus();
@@ -118,7 +175,6 @@ async function init() {
     triggerSave();
   });
 
-  // Load initial content
   try {
     const initialContent = await invoke<string>("scratchpad_get");
     editor.innerHTML = sanitizeHtml(initialContent);
@@ -132,21 +188,24 @@ async function init() {
     triggerSave();
   });
 
-  // Dictation / command mode into this window: engine cannot SendInput into
-  // WebView2, so the shell emits app-insert and we place text at the caret.
+  // --- Engine events ---
+  // DO NOT gate on document.hasFocus() — after STT/LLM, WebView2 often reports
+  // hasFocus()===false even when the Scratchpad is the active window. This
+  // window's script only runs inside Scratchpad, so if we get app-insert here
+  // it is for us.
   try {
     await listen<string>("app-insert", (event) => {
-      // Only the focused VillFlow window should apply text (main may also listen).
-      if (!document.hasFocus()) return;
-      insertDictatedText(event.payload ?? "");
+      const text = event.payload ?? "";
+      if (text) {
+        console.info("[scratchpad] app-insert", text.length, "chars");
+        insertDictatedText(text);
+      }
     });
 
-    // Local status pill — Flow Bar can sit under always-on-top Scratchpad.
-    await listen<string>("engine-state", (event) => {
-      setDictationPill(String(event.payload));
+    await listen("engine-state", (event) => {
+      setDictationPill(event.payload);
     });
 
-    // Shell asks us to focus the editor after hotkey show.
     await listen("scratchpad-focus", () => {
       editor?.focus();
     });
@@ -154,7 +213,6 @@ async function init() {
     console.error("Failed to listen for app events:", e);
   }
 
-  // Intercept close button to hide instead of destroying
   try {
     const appWindow = getCurrentWindow();
     await appWindow.onCloseRequested(async (event) => {
@@ -165,52 +223,7 @@ async function init() {
     console.error("Failed to setup close handler:", e);
   }
 
-  // Keep caret ready for dictation when the window is shown.
   editor.focus();
-}
-
-/**
- * Insert dictated / command-mode text at the caret (or replace the selection).
- * Mirrors normal typing into the contenteditable editor.
- */
-function insertDictatedText(text: string) {
-  if (!editor || !text) return;
-
-  editor.focus();
-
-  // Preferred: insertText respects selection (command-mode replace works).
-  let inserted = false;
-  try {
-    inserted = document.execCommand("insertText", false, text);
-  } catch {
-    inserted = false;
-  }
-
-  if (!inserted) {
-    const sel = window.getSelection();
-    if (sel && sel.rangeCount > 0) {
-      const range = sel.getRangeAt(0);
-      // Only mutate ranges that live inside our editor.
-      if (editor.contains(range.commonAncestorContainer)) {
-        range.deleteContents();
-        const node = document.createTextNode(text);
-        range.insertNode(node);
-        range.setStartAfter(node);
-        range.collapse(true);
-        sel.removeAllRanges();
-        sel.addRange(range);
-        inserted = true;
-      }
-    }
-  }
-
-  if (!inserted) {
-    // Fallback: append at end.
-    editor.appendChild(document.createTextNode(text));
-  }
-
-  updateWordCount(editor.innerText || "");
-  triggerSave();
 }
 
 window.addEventListener("DOMContentLoaded", init);
