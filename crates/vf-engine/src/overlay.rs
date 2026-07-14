@@ -25,8 +25,9 @@ use windows::Win32::Graphics::Gdi::InvalidateRect;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetSystemMetrics,
     LoadCursorW, MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW, SetLayeredWindowAttributes,
-    ShowWindow, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, HICON, IDC_ARROW, LWA_ALPHA,
-    MSG, SM_CXSCREEN, SM_CYSCREEN, SW_HIDE, SW_SHOWNOACTIVATE, WM_DESTROY, WM_PAINT, WM_USER,
+    SetWindowPos, ShowWindow, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, HICON,
+    HWND_TOPMOST, IDC_ARROW, LWA_ALPHA, MSG, SM_CXSCREEN, SM_CYSCREEN, SW_HIDE, SW_SHOWNOACTIVATE,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, WM_DESTROY, WM_PAINT, WM_USER,
     WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
@@ -239,9 +240,20 @@ unsafe fn refresh_visibility(hwnd: HWND) {
         }
         _ => {
             position_bottom_center(hwnd);
+            // Re-assert TOPMOST on every show so the pill stays above Tauri
+            // always-on-top windows (Scratchpad). Z-order among TOPMOST peers
+            // is "last SetWindowPos wins".
+            let _ = SetWindowPos(
+                hwnd,
+                Some(HWND_TOPMOST),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+            );
             let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
             let _ = UpdateWindow(hwnd);
-            // Force repaint.
             let _ = InvalidateRect(Some(hwnd), None, true);
         }
     }

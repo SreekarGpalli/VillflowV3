@@ -79,6 +79,19 @@ function triggerSave() {
   debounceTimeout = window.setTimeout(saveContent, 500);
 }
 
+function setDictationPill(state: string) {
+  const pill = document.getElementById("dictation-pill");
+  const label = document.getElementById("dictation-pill-label");
+  if (!pill || !label) return;
+
+  pill.classList.remove("visible", "recording", "processing", "injecting");
+  const s = String(state);
+  if (s === "Recording" || s === "Processing" || s === "Injecting") {
+    pill.classList.add("visible", s.toLowerCase());
+    label.textContent = s;
+  }
+}
+
 async function init() {
   editor = document.getElementById("scratchpad-editor") as HTMLDivElement;
   saveStatus = document.getElementById("save-status");
@@ -127,8 +140,18 @@ async function init() {
       if (!document.hasFocus()) return;
       insertDictatedText(event.payload ?? "");
     });
+
+    // Local status pill — Flow Bar can sit under always-on-top Scratchpad.
+    await listen<string>("engine-state", (event) => {
+      setDictationPill(String(event.payload));
+    });
+
+    // Shell asks us to focus the editor after hotkey show.
+    await listen("scratchpad-focus", () => {
+      editor?.focus();
+    });
   } catch (e) {
-    console.error("Failed to listen for app-insert:", e);
+    console.error("Failed to listen for app events:", e);
   }
 
   // Intercept close button to hide instead of destroying

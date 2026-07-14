@@ -165,9 +165,15 @@ pub async fn run(
                 match ev {
                     None => break,
                     Some(HotkeyEvent::Down(HotkeyId::Scratchpad)) => {
-                        rt.emit(EngineEvent::ToggleScratchpad);
+                        // Toggle only when idle — avoid hiding Scratchpad mid-dictation.
+                        // Edge-trigger is the main key down (not modifier releases).
+                        if rt.state == EngineState::Idle {
+                            rt.emit(EngineEvent::ToggleScratchpad);
+                        }
                     }
-                    Some(HotkeyEvent::Up(HotkeyId::Scratchpad)) => {}
+                    Some(HotkeyEvent::Up(HotkeyId::Scratchpad)) => {
+                        // No-op: scratchpad is a press-to-toggle, not push-to-talk.
+                    }
                     Some(HotkeyEvent::Down(HotkeyId::Dictation)) => {
                         if rt.state == EngineState::Idle {
                             begin_utterance(&mut rt, UtteranceMode::Dictation).await;

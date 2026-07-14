@@ -1,9 +1,11 @@
 // Prevents additional console window on Windows in release, do not remove.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tauri::State;
-use tauri::{Emitter, Manager, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri_plugin_notification::NotificationExt;
@@ -12,6 +14,60 @@ use vf_engine::EngineHandle;
 use vf_store::SqliteStore;
 
 pub struct AppSettings(pub std::sync::Mutex<Settings>);
+
+/// Tracks whether we believe the Scratchpad is open, plus debounce for the hotkey.
+/// `is_visible()` alone is flaky with always-on-top / hide-to-tray windows.
+pub struct ScratchpadUi {
+    open: AtomicBool,
+    last_toggle: std::sync::Mutex<Option<Instant>>,
+}
+
+impl ScratchpadUi {
+    fn new() -> Self {
+        Self {
+            open: AtomicBool::new(false),
+            last_toggle: std::sync::Mutex::new(None),
+        }
+    }
+}
+
+/// Show or hide the Scratchpad reliably (hotkey + tray share this path).
+fn toggle_scratchpad_window(app: &AppHandle) {
+    let Some(win) = app.get_webview_window("scratchpad") else {
+        return;
+    };
+    let ui = app.state::<ScratchpadUi>();
+
+    // Debounce rapid re-fires (key repeat / dual event paths).
+    {
+        let mut last = ui.last_toggle.lock().unwrap();
+        let now = Instant::now();
+        if let Some(t) = *last {
+            if now.duration_since(t) < Duration::from_millis(350) {
+                return;
+            }
+        }
+        *last = Some(now);
+    }
+
+    let currently_open = ui.open.load(Ordering::SeqCst);
+    // Also trust the OS if our flag drifted (e.g. user closed via X → hide).
+    let os_visible = win.is_visible().unwrap_or(false) && !win.is_minimized().unwrap_or(false);
+    let open = currently_open || os_visible;
+
+    if open {
+        let _ = win.hide();
+        ui.open.store(false, Ordering::SeqCst);
+    } else {
+        let _ = win.unminimize();
+        let _ = win.show();
+        let _ = win.set_always_on_top(true);
+        let _ = win.set_focus();
+        ui.open.store(true, Ordering::SeqCst);
+        // Tell the webview to focus the editor caret.
+        let _ = win.emit("scratchpad-focus", ());
+    }
+}
 
 #[tauri::command]
 fn get_settings(settings_state: State<'_, AppSettings>) -> Result<Settings, String> {
@@ -194,6 +250,7 @@ fn main() {
         .manage(store_state)
         .manage(engine_handle_for_state)
         .manage(app_settings)
+        .manage(ScratchpadUi::new())
         .setup(move |app| {
             let app_handle = app.handle().clone();
 
@@ -233,16 +290,7 @@ fn main() {
                         }
                     }
                     "toggle_scratch" => {
-                        if let Some(scratchpad_window) = app.get_webview_window("scratchpad") {
-                            if let Ok(visible) = scratchpad_window.is_visible() {
-                                if visible {
-                                    let _ = scratchpad_window.hide();
-                                } else {
-                                    let _ = scratchpad_window.show();
-                                    let _ = scratchpad_window.set_focus();
-                                }
-                            }
-                        }
+                        toggle_scratchpad_window(app);
                     }
                     "quit" => {
                         if let Some(engine) = app.try_state::<EngineHandle>() {
@@ -307,17 +355,7 @@ fn main() {
                             }
                         }
                         EngineEvent::ToggleScratchpad => {
-                            let _ = app_handle.emit("scratchpad-toggle", ());
-                            if let Some(scratchpad_window) = app_handle.get_webview_window("scratchpad") {
-                                if let Ok(visible) = scratchpad_window.is_visible() {
-                                    if visible {
-                                        let _ = scratchpad_window.hide();
-                                    } else {
-                                        let _ = scratchpad_window.show();
-                                        let _ = scratchpad_window.set_focus();
-                                    }
-                                }
-                            }
+                            toggle_scratchpad_window(&app_handle);
                         }
                         EngineEvent::AppInsert { text } => {
                             // Broadcast to all webviews; the focused editable
@@ -336,6 +374,12 @@ fn main() {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.hide();
+                // Keep ScratchpadUi flag in sync when user closes via the X button.
+                if window.label() == "scratchpad" {
+                    if let Some(ui) = window.try_state::<ScratchpadUi>() {
+                        ui.open.store(false, Ordering::SeqCst);
+                    }
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![

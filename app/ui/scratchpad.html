@@ -176,6 +176,61 @@
 
     #save-status.status-error { color: var(--danger); }
     #save-status.status-error::before { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
+
+    /* In-window dictation status (Flow Bar can sit under always-on-top Scratchpad). */
+    .dictation-pill {
+      display: none;
+      position: absolute;
+      bottom: 52px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 20;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 18px;
+      border-radius: 999px;
+      background: rgba(26, 26, 34, 0.94);
+      border: 1px solid rgba(168, 199, 250, 0.35);
+      color: #f0f0f0;
+      font-size: 13px;
+      font-weight: 600;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+      pointer-events: none;
+    }
+    .dictation-pill.visible {
+      display: inline-flex;
+    }
+    .dictation-pill .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #9ca3af;
+    }
+    .dictation-pill.recording .dot {
+      background: #f87171;
+      box-shadow: 0 0 10px #f87171;
+      animation: pulse 1s infinite;
+    }
+    .dictation-pill.processing .dot,
+    .dictation-pill.injecting .dot {
+      background: #fbbf24;
+      box-shadow: 0 0 10px #fbbf24;
+      animation: pulse 1.2s infinite;
+    }
+    .dictation-pill .level {
+      width: 64px;
+      height: 4px;
+      border-radius: 2px;
+      background: rgba(255, 255, 255, 0.08);
+      overflow: hidden;
+    }
+    .dictation-pill .level > i {
+      display: block;
+      height: 100%;
+      width: 0%;
+      background: #60a0c8;
+      transition: width 0.08s linear;
+    }
   </style>
 </head>
 <body>
@@ -190,6 +245,12 @@
     <button class="tool-btn" id="btn-bullets" title="Bullet List">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
     </button>
+  </div>
+
+  <div class="dictation-pill" id="dictation-pill" aria-live="polite">
+    <span class="dot"></span>
+    <span class="label" id="dictation-pill-label">Recording</span>
+    <span class="level" id="dictation-level" hidden><i></i></span>
   </div>
 
   <!-- Editable Document Area -->
