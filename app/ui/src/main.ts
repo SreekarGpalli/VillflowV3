@@ -1082,6 +1082,28 @@ async function setupEngineEventListeners() {
         const errMsg = event.payload;
         showToast(`Engine Error: ${errMsg}`, "error");
       });
+
+      // Dictation into Settings fields when this window is focused.
+      await listen<string>("app-insert", (event) => {
+        if (!document.hasFocus()) return;
+        const text = event.payload ?? "";
+        if (!text) return;
+        const el = document.activeElement as HTMLElement | null;
+        if (!el) return;
+        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+          const start = el.selectionStart ?? el.value.length;
+          const end = el.selectionEnd ?? el.value.length;
+          const before = el.value.slice(0, start);
+          const after = el.value.slice(end);
+          el.value = before + text + after;
+          const caret = start + text.length;
+          el.selectionStart = caret;
+          el.selectionEnd = caret;
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+        } else if (el.isContentEditable) {
+          document.execCommand("insertText", false, text);
+        }
+      });
     } catch (err) {
       console.error("Failed to setup engine state event listeners:", err);
     }

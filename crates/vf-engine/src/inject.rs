@@ -5,22 +5,44 @@ use std::time::{Duration, Instant};
 
 use arboard::Clipboard;
 use vf_core::InjectionMethod;
+use windows::Win32::System::Threading::GetCurrentProcessId;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
     KEYEVENTF_UNICODE, VIRTUAL_KEY, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT, VK_V,
 };
+use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+
+/// How text was (or should be) delivered after [`inject_text`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InjectOutcome {
+    /// Sent via clipboard paste or SendInput to an external app.
+    External,
+    /// Foreground window is VillFlow itself — shell must deliver via frontend.
+    InApp,
+}
 
 /// Inject `text` into the currently focused field.
+///
+/// When the focused window belongs to this process (Scratchpad / Settings),
+/// returns [`InjectOutcome::InApp`] without using SendInput — WebView2 does not
+/// reliably accept synthetic Ctrl+V or unicode input.
 pub fn inject_text(
     text: &str,
     method: InjectionMethod,
     restore_clipboard: bool,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<InjectOutcome> {
     // The user may still be holding Ctrl/Shift from the push-to-talk chord.
     // Injecting Ctrl+V (or typing) under held modifiers turns it into e.g.
     // Ctrl+Shift+V inside the target app — wait for release, then force-clear
     // anything still held.
     settle_modifiers(Duration::from_millis(800));
+
+    if foreground_is_self() {
+        force_release_all_modifiers();
+        log::debug!("inject: foreground is VillFlow — using in-app delivery");
+        return Ok(InjectOutcome::InApp);
+    }
+
     let result = match method {
         InjectionMethod::ClipboardPaste => inject_clipboard_paste(text, restore_clipboard),
         InjectionMethod::SendInputTyping => inject_sendinput_typing(text),
@@ -28,7 +50,23 @@ pub fn inject_text(
     // Leave the OS with a clean modifier state so mouse/keyboard feel normal
     // after dictation (no phantom Shift+click).
     force_release_all_modifiers();
-    result
+    result.map(|_| InjectOutcome::External)
+}
+
+/// True when the foreground window is owned by this process (Scratchpad, main UI).
+pub fn foreground_is_self() -> bool {
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.0.is_null() {
+            return false;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        if pid == 0 {
+            return false;
+        }
+        pid == GetCurrentProcessId()
+    }
 }
 
 /// Public: clear sticky modifiers after an utterance ends (even if inject was skipped).
@@ -86,6 +124,7 @@ fn settle_modifiers(max_wait: Duration) {
 }
 
 fn inject_clipboard_paste(text: &str, restore_clipboard: bool) -> anyhow::Result<()> {
+    // (external apps only — see InjectOutcome::InApp for our WebViews)
     let mut clip = Clipboard::new()?;
     let previous = if restore_clipboard {
         clip.get_text().ok()

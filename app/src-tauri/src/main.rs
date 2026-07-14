@@ -319,6 +319,12 @@ fn main() {
                                 }
                             }
                         }
+                        EngineEvent::AppInsert { text } => {
+                            // Broadcast to all webviews; the focused editable
+                            // field (Scratchpad editor, or a settings control)
+                            // applies it. WebView2 cannot take SendInput paste.
+                            let _ = app_handle.emit("app-insert", text);
+                        }
                         _ => {}
                     }
                 }

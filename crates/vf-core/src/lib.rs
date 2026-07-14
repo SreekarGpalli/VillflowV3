@@ -123,6 +123,10 @@ pub enum EngineEvent {
     Injected { words: u32, total_ms: u64 },
     ToggleScratchpad,
     DictionaryLearned(String),
+    /// Insert text into our own UI (WebView). WebView2 ignores synthetic
+    /// SendInput/Ctrl+V, so when the focused window is VillFlow itself the
+    /// engine asks the shell to deliver text via frontend events instead.
+    AppInsert { text: String },
 }
 
 #[derive(Debug, Clone)]

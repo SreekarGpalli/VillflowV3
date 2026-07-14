@@ -522,7 +522,15 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
             .await;
 
     match inject_result {
-        Ok(Ok(())) => {}
+        Ok(Ok(inject::InjectOutcome::External)) => {}
+        Ok(Ok(inject::InjectOutcome::InApp)) => {
+            // Scratchpad / settings WebView — deliver via shell frontend event.
+            rt.emit(EngineEvent::AppInsert {
+                text: final_text.clone(),
+            });
+            // Give the WebView a beat to apply the insert before we move on.
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
         Ok(Err(e)) => {
             rt.error(format!("injection failed: {e}"));
             return;

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 let editor: HTMLDivElement | null = null;
@@ -118,6 +119,18 @@ async function init() {
     triggerSave();
   });
 
+  // Dictation / command mode into this window: engine cannot SendInput into
+  // WebView2, so the shell emits app-insert and we place text at the caret.
+  try {
+    await listen<string>("app-insert", (event) => {
+      // Only the focused VillFlow window should apply text (main may also listen).
+      if (!document.hasFocus()) return;
+      insertDictatedText(event.payload ?? "");
+    });
+  } catch (e) {
+    console.error("Failed to listen for app-insert:", e);
+  }
+
   // Intercept close button to hide instead of destroying
   try {
     const appWindow = getCurrentWindow();
@@ -128,6 +141,53 @@ async function init() {
   } catch (e) {
     console.error("Failed to setup close handler:", e);
   }
+
+  // Keep caret ready for dictation when the window is shown.
+  editor.focus();
+}
+
+/**
+ * Insert dictated / command-mode text at the caret (or replace the selection).
+ * Mirrors normal typing into the contenteditable editor.
+ */
+function insertDictatedText(text: string) {
+  if (!editor || !text) return;
+
+  editor.focus();
+
+  // Preferred: insertText respects selection (command-mode replace works).
+  let inserted = false;
+  try {
+    inserted = document.execCommand("insertText", false, text);
+  } catch {
+    inserted = false;
+  }
+
+  if (!inserted) {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      const range = sel.getRangeAt(0);
+      // Only mutate ranges that live inside our editor.
+      if (editor.contains(range.commonAncestorContainer)) {
+        range.deleteContents();
+        const node = document.createTextNode(text);
+        range.insertNode(node);
+        range.setStartAfter(node);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        inserted = true;
+      }
+    }
+  }
+
+  if (!inserted) {
+    // Fallback: append at end.
+    editor.appendChild(document.createTextNode(text));
+  }
+
+  updateWordCount(editor.innerText || "");
+  triggerSave();
 }
 
 window.addEventListener("DOMContentLoaded", init);
