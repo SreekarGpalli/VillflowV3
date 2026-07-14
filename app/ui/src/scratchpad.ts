@@ -189,17 +189,20 @@ async function init() {
   });
 
   // --- Engine events ---
-  // DO NOT gate on document.hasFocus() — after STT/LLM, WebView2 often reports
-  // hasFocus()===false even when the Scratchpad is the active window. This
-  // window's script only runs inside Scratchpad, so if we get app-insert here
-  // it is for us.
+  // The shell only emits app-insert to the target window (focused / open).
+  // Still guard: if Scratchpad is hidden, never apply inserts.
   try {
-    await listen<string>("app-insert", (event) => {
+    await listen<string>("app-insert", async (event) => {
       const text = event.payload ?? "";
-      if (text) {
-        console.info("[scratchpad] app-insert", text.length, "chars");
-        insertDictatedText(text);
+      if (!text) return;
+      try {
+        const appWindow = getCurrentWindow();
+        if (!(await appWindow.isVisible())) return;
+      } catch {
+        /* proceed if visibility check fails */
       }
+      console.info("[scratchpad] app-insert", text.length, "chars");
+      insertDictatedText(text);
     });
 
     await listen("engine-state", (event) => {

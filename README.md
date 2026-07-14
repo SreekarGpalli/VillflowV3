@@ -1,12 +1,69 @@
 # VillFlow
 
-Windows push-to-talk voice dictation (Rust + Tauri v2). Hold `Ctrl+Shift+Z` anywhere, speak, release — polished text lands at your cursor. `Ctrl+Shift+X` transforms selected text by spoken command. `Ctrl+Shift+C` toggles the Scratchpad.
+**Windows push-to-talk voice dictation.** Hold a hotkey, speak, release — polished text lands at your cursor in any app.
 
-Authoritative spec: [CONTRACTS.md](CONTRACTS.md).
+[![CI](https://github.com/OWNER/VillFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/VillFlow/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows%2011-0078D6)](#requirements)
 
-## Build & run
+> Replace `OWNER` in the CI badge with your GitHub username or org after you push the repo.
 
-**Production build** (embeds the UI — the only correct way to build the exe):
+---
+
+## Features
+
+| Hotkey | Action |
+| ------ | ------ |
+| **Ctrl+Shift+Z** | Dictation — hold to speak, release to paste cleaned text |
+| **Ctrl+Shift+X** | Command mode — rewrite selected text, or generate when nothing is selected |
+| **Ctrl+Shift+C** | Toggle floating Scratchpad |
+
+- **Tray-resident** — runs in the background; close the window to hide, not quit
+- **ElevenLabs** realtime speech-to-text with ordered API-key failover
+- **Groq** cleanup levels: none / light / medium / high
+- **Dictionary** with preferred spellings, starring, and optional auto-learn
+- **History & insights** — transcripts, WPM, top apps, activity heatmap
+- **Privacy-first** — keys and data stay on your PC; no accounts, no telemetry
+
+## Requirements
+
+- **Windows 11** (x64)
+- An [ElevenLabs](https://elevenlabs.io/) API key (speech-to-text)
+- A [Groq](https://console.groq.com/) API key (text cleanup / commands)
+- Microphone access
+
+## Download
+
+See [Releases](https://github.com/OWNER/VillFlow/releases) for prebuilt `villflow.exe` (when published).
+
+Or build from source below.
+
+## Quick start (from source)
+
+### 1. Install tools
+
+- [Rust](https://rustup.rs/) (stable, MSVC toolchain)
+- [Node.js 20+](https://nodejs.org/)
+- Visual Studio **Desktop development with C++** (or Build Tools)
+
+### 2. Clone and install UI deps
+
+```powershell
+git clone https://github.com/OWNER/VillFlow.git
+cd VillFlow
+cd app\ui
+npm install
+cd ..\..
+```
+
+### 3. Run in development
+
+```powershell
+cd app
+ui\node_modules\.bin\tauri.cmd dev
+```
+
+### 4. Production build
 
 ```powershell
 cd app
@@ -14,30 +71,67 @@ ui\node_modules\.bin\tauri.cmd build --no-bundle
 # → target\release\villflow.exe
 ```
 
-**Dev mode** (hot-reload UI; starts Vite automatically):
+> ⚠️ **Do not use plain `cargo build` for the app.** That binary expects the Vite dev server (`localhost:5173`) and will show *connection refused* without it. Always build through the Tauri CLI so the UI is embedded.
 
-```powershell
-cd app
-ui\node_modules\.bin\tauri.cmd dev
+### 5. Configure keys
+
+1. Start VillFlow (tray icon)
+2. Open **VillFlow** from the tray
+3. **AI Services** → add your ElevenLabs key(s) and Groq key
+4. Optionally pick a Groq model (Refresh loads the live list)
+
+Settings live at `%APPDATA%\VillFlow\settings.json`.
+
+## Configuration paths
+
+| Path | Purpose |
+| ---- | ------- |
+| `%APPDATA%\VillFlow\settings.json` | Settings & API keys |
+| `%APPDATA%\VillFlow\villflow.db` | Dictionary, history, scratchpad |
+| `%APPDATA%\VillFlow\logs\villflow.log` | Application log |
+
+## Architecture
+
+```
+crates/vf-core     Shared types & settings defaults
+crates/vf-store    settings.json + SQLite
+crates/vf-cloud    ElevenLabs STT + Groq LLM
+crates/vf-engine   Hotkeys, audio, UIA, inject, overlay, orchestrator
+app/src-tauri      Tauri shell, tray, IPC
+app/ui             Settings UI + Scratchpad (vanilla TS + Vite)
 ```
 
-> ⚠ Plain `cargo build` / `cargo run` produces a binary that tries to load the Vite dev server (`localhost:5173`) and shows *"localhost refused to connect"* if Vite isn't running. Always build the exe via the Tauri CLI as above. First-time setup: `cd app\ui && npm install`.
-
-## Configuration
-
-- Settings file: `%APPDATA%\VillFlow\settings.json` (auto-created with defaults on first run; editable in-app under Settings).
-- Database (dictionary / history / scratchpad): `%APPDATA%\VillFlow\villflow.db`.
-- API keys: ElevenLabs key list under **AI Services → ElevenLabs** (ordered; automatic failover top-to-bottom), Groq key + model picker under **AI Services → Groq**.
-
-## Smoke test (validates keys + cloud clients, no microphone needed)
-
-```powershell
-cargo run --release -p vf-cloud --example live_smoke -- path\to\16khz_mono_s16le.wav
-# without a wav argument, only the Groq checks run
-```
+Product contracts and design decisions: [CONTRACTS.md](CONTRACTS.md).
 
 ## Tests
 
 ```powershell
 cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
 ```
+
+Optional cloud smoke test (uses keys from your settings file):
+
+```powershell
+cargo run --release -p vf-cloud --example live_smoke
+```
+
+## Privacy & security
+
+- API keys are stored only in local `settings.json` and are never logged
+- Network: ElevenLabs STT + Groq LLM only
+- No analytics, no account system, no auto-update
+
+See [SECURITY.md](SECURITY.md) for vulnerability reporting.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
+
+## License
+
+[MIT](LICENSE) © VillFlow contributors

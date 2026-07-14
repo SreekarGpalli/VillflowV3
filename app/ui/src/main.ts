@@ -431,6 +431,12 @@ function setupHotkeyRecorders() {
       if (e.altKey) parts.push("Alt");
       if (e.metaKey) parts.push("Win");
 
+      // Never allow a bare key — would swallow every press system-wide.
+      if (parts.length === 0) {
+        showToast("Hotkeys must include at least one modifier (Ctrl, Shift, Alt, or Win).", "error");
+        return;
+      }
+
       let key = e.key.toUpperCase();
       if (key === " ") key = "SPACE";
       
@@ -450,7 +456,19 @@ function setupHotkeyRecorders() {
       }
 
       parts.push(key);
-      input.value = parts.join("+");
+      const combo = parts.join("+");
+
+      // Reject duplicates against the other two hotkey fields.
+      const others = hkInputs
+        .filter((oid) => oid !== id)
+        .map((oid) => (document.getElementById(oid) as HTMLInputElement | null)?.value || "");
+      if (others.some((o) => o.toLowerCase() === combo.toLowerCase())) {
+        showToast("That shortcut is already used by another VillFlow hotkey.", "error");
+        input.blur();
+        return;
+      }
+
+      input.value = combo;
       input.blur();
 
       // Trigger change
@@ -756,11 +774,14 @@ function setupPromptResetHandlers() {
 // --- HISTORY LIST & EXPANSIONS ---
 
 const historyContainer = document.getElementById("history-container");
+/** Per-row final text for Copy (avoids stuffing large strings into data-* attrs). */
+const historyCopyText = new Map<number, string>();
 
 async function loadHistory(append = false) {
   try {
     if (!append) {
       historyOffset = 0;
+      historyCopyText.clear();
       if (historyContainer) historyContainer.innerHTML = "";
     }
     
@@ -780,9 +801,14 @@ async function loadHistory(append = false) {
     }
 
     list.forEach(entry => {
-      const date = new Date(entry.ts);
+      // Engine stores local wall-clock ISO without timezone; parse as local, not UTC.
+      const date = parseLocalIso(entry.ts);
       const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       const dateStr = date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+      const entryId = entry.id ?? 0;
+      if (entryId) {
+        historyCopyText.set(entryId, entry.final_text);
+      }
       
       const row = document.createElement("div");
       row.className = "history-row";
@@ -791,7 +817,7 @@ async function loadHistory(append = false) {
           <div class="history-meta">
             <span>${dateStr} ${timeStr}</span>
             <span class="app-badge">${escapeHtml(entry.app_name)}</span>
-            <span style="text-transform: capitalize; color: var(--accent); font-weight: 600;">${entry.mode}</span>
+            <span style="text-transform: capitalize; color: var(--accent); font-weight: 600;">${escapeHtml(entry.mode)}</span>
           </div>
           <div class="history-summary">${escapeHtml(entry.final_text)}</div>
           <span class="expand-arrow" style="display: inline-flex; align-items: center; justify-content: center;">
@@ -818,8 +844,8 @@ async function loadHistory(append = false) {
                   <span>${entry.word_count} words</span>
                 </div>
                 <div style="display:flex; gap:8px;">
-                  <button class="btn btn-sm copy-history-text" data-text="${escapeHtml(entry.final_text)}">Copy</button>
-                  <button class="btn btn-sm btn-danger delete-history" data-id="${entry.id}">Delete</button>
+                  <button class="btn btn-sm copy-history-text" data-id="${entryId}">Copy</button>
+                  <button class="btn btn-sm btn-danger delete-history" data-id="${entryId}">Delete</button>
                 </div>
               </div>
             </div>
@@ -855,7 +881,8 @@ async function loadHistory(append = false) {
         (btn as any).hasListener = true;
         btn.addEventListener("click", async (e) => {
           e.stopPropagation();
-          const text = unescapeHtml(btn.getAttribute("data-text") || "");
+          const id = parseInt(btn.getAttribute("data-id") || "0");
+          const text = historyCopyText.get(id) || "";
           try {
             await navigator.clipboard.writeText(text);
             const origText = btn.innerHTML;
@@ -863,6 +890,7 @@ async function loadHistory(append = false) {
             setTimeout(() => { btn.innerHTML = origText; }, 1500);
           } catch (err) {
             console.error("Failed to copy text:", err);
+            showToast("Failed to copy to clipboard.", "error");
           }
         });
       }
@@ -880,6 +908,7 @@ async function loadHistory(append = false) {
           if (!confirm("Delete this history entry?")) return;
           try {
             await invoke("history_delete", { id });
+            historyCopyText.delete(id);
             btn.closest(".history-row")?.remove();
             if (historyContainer.querySelectorAll(".history-row").length === 0) {
               await loadHistory();
@@ -1016,6 +1045,25 @@ function localDateStr(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+/**
+ * Parse `YYYY-MM-DDTHH:MM:SS` (or date-only) as a local Date.
+ * Avoid `new Date(iso)` which some engines treat as UTC when no offset is present.
+ */
+function parseLocalIso(ts: string): Date {
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?/.exec(ts.trim());
+  if (!m) {
+    const fallback = new Date(ts);
+    return Number.isNaN(fallback.getTime()) ? new Date() : fallback;
+  }
+  const year = Number(m[1]);
+  const month = Number(m[2]) - 1;
+  const day = Number(m[3]);
+  const hour = Number(m[4] ?? "0");
+  const min = Number(m[5] ?? "0");
+  const sec = Number(m[6] ?? "0");
+  return new Date(year, month, day, hour, min, sec);
+}
+
 function escapeHtml(unsafe: string): string {
   return unsafe
     .replace(/&/g, "&amp;")
@@ -1023,15 +1071,6 @@ function escapeHtml(unsafe: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
-}
-
-function unescapeHtml(safe: string): string {
-  return safe
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#039;/g, "'");
 }
 
 function showToast(message: string, type: "success" | "error" | "info" = "info") {

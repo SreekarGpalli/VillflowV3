@@ -1,6 +1,7 @@
 // Prevents additional console window on Windows in release, do not remove.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -76,21 +77,79 @@ fn toggle_scratchpad_window(app: &AppHandle) {
 }
 
 /// Deliver dictation text into our WebViews (Scratchpad / main).
+///
+/// Only the focused VillFlow window receives the insert. Emitting to both
+/// windows previously polluted the Scratchpad whenever the user dictated into
+/// a Settings field (and vice-versa).
 fn emit_app_insert(app: &AppHandle, text: &str) {
-    // Target windows explicitly — more reliable than a global emit alone.
-    if let Some(w) = app.get_webview_window("scratchpad") {
-        let _ = w.emit("app-insert", text);
+    let labels = ["scratchpad", "main"];
+    for label in labels {
+        if let Some(w) = app.get_webview_window(label) {
+            if w.is_focused().unwrap_or(false) {
+                let _ = w.emit("app-insert", text);
+                return;
+            }
+        }
+    }
+    // Neither reports focus (common with WebView2 focus quirks): prefer an
+    // open Scratchpad, else the main window.
+    if let Some(ui) = app.try_state::<ScratchpadUi>() {
+        if ui.open.load(Ordering::SeqCst) {
+            if let Some(w) = app.get_webview_window("scratchpad") {
+                let _ = w.emit("app-insert", text);
+                return;
+            }
+        }
     }
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.emit("app-insert", text);
     }
-    // Also global, for any other listeners.
-    let _ = app.emit("app-insert", text);
 }
 
 #[tauri::command]
 fn get_settings(settings_state: State<'_, AppSettings>) -> Result<Settings, String> {
     Ok(settings_state.0.lock().unwrap().clone())
+}
+
+/// Validate hotkey combos before persisting. Requires at least one modifier
+/// per combo (never swallow bare letter keys system-wide) and unique combos.
+fn validate_hotkeys(settings: &Settings) -> Result<(), String> {
+    use vf_engine::KeyCombo;
+
+    let dictation = KeyCombo::parse(&settings.hotkeys.dictation)
+        .ok_or_else(|| format!("Invalid dictation hotkey: {}", settings.hotkeys.dictation))?;
+    let command = KeyCombo::parse(&settings.hotkeys.command_mode).ok_or_else(|| {
+        format!(
+            "Invalid command mode hotkey: {}",
+            settings.hotkeys.command_mode
+        )
+    })?;
+    let scratchpad = KeyCombo::parse(&settings.hotkeys.scratchpad)
+        .ok_or_else(|| format!("Invalid scratchpad hotkey: {}", settings.hotkeys.scratchpad))?;
+
+    for (name, combo) in [
+        ("dictation", &dictation),
+        ("command mode", &command),
+        ("scratchpad", &scratchpad),
+    ] {
+        if !(combo.ctrl || combo.shift || combo.alt || combo.win) {
+            return Err(format!(
+                "Hotkey for {name} must include at least one modifier (Ctrl/Shift/Alt/Win)"
+            ));
+        }
+    }
+
+    if dictation == command {
+        return Err("Dictation and command mode hotkeys must be different".into());
+    }
+    if dictation == scratchpad {
+        return Err("Dictation and scratchpad hotkeys must be different".into());
+    }
+    if command == scratchpad {
+        return Err("Command mode and scratchpad hotkeys must be different".into());
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -100,6 +159,8 @@ fn save_settings(
     _store: State<'_, Arc<SqliteStore>>,
     engine: State<'_, EngineHandle>,
 ) -> Result<(), String> {
+    validate_hotkeys(&settings)?;
+
     let settings_path = vf_store::get_default_settings_path()
         .ok_or_else(|| "Could not resolve settings path".to_string())?;
     vf_store::save_settings(&settings, &settings_path).map_err(|e| e.to_string())?;
@@ -257,16 +318,104 @@ fn autostart_status() -> Result<bool, String> {
     Ok(value.is_ok())
 }
 
-fn main() {
-    env_logger::init();
+/// Initialize logging to stderr + `%APPDATA%\VillFlow\logs\villflow.log` (§3).
+fn init_logging() {
+    use std::fs::OpenOptions;
 
-    let db_path = vf_store::get_default_db_path().expect("Could not resolve default DB path");
-    let store = vf_store::SqliteStore::new(&db_path).expect("Failed to initialize SqliteStore");
+    let env = env_logger::Env::default().default_filter_or("info");
+    let mut builder = env_logger::Builder::from_env(env);
+
+    if let Some(log_path) = dirs::config_dir().map(|p| p.join("VillFlow").join("logs").join("villflow.log"))
+    {
+        if let Some(parent) = log_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match OpenOptions::new().create(true).append(true).open(&log_path) {
+            Ok(file) => {
+                let file = std::sync::Mutex::new(file);
+                builder.target(env_logger::Target::Pipe(Box::new(WriteAdapter(file))));
+                // Also keep a stderr fallback for `tauri dev` console visibility.
+                // env_logger only supports one target; dual-write via adapter.
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "VillFlow logging to {}",
+                    log_path.display()
+                );
+            }
+            Err(e) => {
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "VillFlow: could not open log file ({}): {e}",
+                    log_path.display()
+                );
+            }
+        }
+    }
+
+    let _ = builder.try_init();
+}
+
+/// Mutex-guarded file that implements `Write` for env_logger.
+struct WriteAdapter(std::sync::Mutex<std::fs::File>);
+
+impl Write for WriteAdapter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let mut file = self
+            .0
+            .lock()
+            .map_err(|_| std::io::Error::other("log file mutex poisoned"))?;
+        // Mirror to stderr so `tauri dev` still shows logs.
+        let _ = std::io::stderr().write_all(buf);
+        file.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        let mut file = self
+            .0
+            .lock()
+            .map_err(|_| std::io::Error::other("log file mutex poisoned"))?;
+        let _ = std::io::stderr().flush();
+        file.flush()
+    }
+}
+
+fn main() {
+    init_logging();
+
+    let db_path = match vf_store::get_default_db_path() {
+        Some(p) => p,
+        None => {
+            log::error!("Could not resolve %APPDATA%\\VillFlow path");
+            eprintln!("VillFlow: could not resolve application data directory.");
+            std::process::exit(1);
+        }
+    };
+    let store = match vf_store::SqliteStore::new(&db_path) {
+        Ok(s) => s,
+        Err(e) => {
+            log::error!("Failed to initialize database: {e}");
+            eprintln!("VillFlow: failed to open database: {e}");
+            std::process::exit(1);
+        }
+    };
     let store_state = Arc::new(store);
 
-    let settings_path =
-        vf_store::get_default_settings_path().expect("Could not resolve default Settings path");
-    let settings = vf_store::load_settings(&settings_path).expect("Failed to load settings");
+    let settings_path = match vf_store::get_default_settings_path() {
+        Some(p) => p,
+        None => {
+            log::error!("Could not resolve settings path");
+            eprintln!("VillFlow: could not resolve settings path.");
+            std::process::exit(1);
+        }
+    };
+    let settings = match vf_store::load_settings(&settings_path) {
+        Ok(s) => s,
+        Err(e) => {
+            log::error!("Failed to load settings: {e}");
+            eprintln!("VillFlow: failed to load settings: {e}");
+            std::process::exit(1);
+        }
+    };
 
     let engine_handle = vf_engine::spawn(settings.clone(), store_state.clone() as Arc<dyn Store>);
     let engine_handle_for_setup = engine_handle.subscribe();

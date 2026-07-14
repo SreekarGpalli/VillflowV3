@@ -54,6 +54,9 @@ pub struct KeyCombo {
 
 impl KeyCombo {
     /// Parse strings like `Ctrl+Shift+Z`, `Ctrl+Shift+X`, case-insensitive.
+    ///
+    /// Requires at least one modifier — bare keys are rejected so a misconfigured
+    /// settings file cannot swallow every press of a letter system-wide.
     pub fn parse(s: &str) -> Option<Self> {
         let mut ctrl = false;
         let mut shift = false;
@@ -94,6 +97,9 @@ impl KeyCombo {
                 }
             }
         }
+        if !(ctrl || shift || alt || win) {
+            return None;
+        }
         Some(Self {
             ctrl,
             shift,
@@ -101,6 +107,11 @@ impl KeyCombo {
             win,
             key_vk: key_vk?,
         })
+    }
+
+    /// True when this combo has at least one modifier (Ctrl/Shift/Alt/Win).
+    pub fn has_modifier(&self) -> bool {
+        self.ctrl || self.shift || self.alt || self.win
     }
 
     pub fn matches_modifiers(&self, ctrl: bool, shift: bool, alt: bool, win: bool) -> bool {
@@ -485,6 +496,13 @@ mod tests {
         let c = KeyCombo::parse("Ctrl+Shift+Z").unwrap();
         assert!(!c.matches_modifiers(false, false, false, false));
         assert!(c.matches_modifiers(true, true, false, false));
+    }
+
+    #[test]
+    fn bare_key_without_modifier_rejected() {
+        assert!(KeyCombo::parse("Z").is_none());
+        assert!(KeyCombo::parse("Space").is_none());
+        assert!(KeyCombo::parse("Ctrl+Z").is_some());
     }
 
     #[test]

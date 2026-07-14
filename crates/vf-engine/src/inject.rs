@@ -136,9 +136,12 @@ fn inject_clipboard_paste(text: &str, restore_clipboard: bool) -> anyhow::Result
     };
 
     clip.set_text(text.to_string())?;
-    thread::sleep(Duration::from_millis(15));
+    // Brief settle so the clipboard server publishes the new value before Ctrl+V.
+    thread::sleep(Duration::from_millis(20));
     send_ctrl_v()?;
-    thread::sleep(Duration::from_millis(80));
+    // Wait for the target app to consume the paste before restoring. Too short
+    // and some apps (Electron, Office) still read the restored previous clip.
+    thread::sleep(Duration::from_millis(120));
 
     if restore_clipboard {
         match previous {

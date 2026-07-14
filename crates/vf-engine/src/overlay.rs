@@ -32,7 +32,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 const WM_OVERLAY_CMD: u32 = WM_USER + 40;
-const PILL_W: i32 = 200;
+const PILL_W_DEFAULT: i32 = 200;
+const PILL_W_TOAST_MAX: i32 = 420;
 const PILL_H: i32 = 40;
 
 #[derive(Debug, Clone)]
@@ -158,7 +159,7 @@ fn run_overlay_thread(rx: &mut mpsc::UnboundedReceiver<OverlayCmd>) -> anyhow::R
             WS_POPUP,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
-            PILL_W,
+            PILL_W_DEFAULT,
             PILL_H,
             None,
             None,
@@ -173,7 +174,7 @@ fn run_overlay_thread(rx: &mut mpsc::UnboundedReceiver<OverlayCmd>) -> anyhow::R
             *shared.hwnd.lock().unwrap() = Some(SendHwnd(hwnd));
         }
 
-        position_bottom_center(hwnd);
+        position_bottom_center(hwnd, PILL_W_DEFAULT);
         let _ = ShowWindow(hwnd, SW_HIDE);
 
         // Pump: interleave GetMessage with channel polls via a timer-like peek loop.
@@ -221,12 +222,24 @@ fn run_overlay_thread(rx: &mut mpsc::UnboundedReceiver<OverlayCmd>) -> anyhow::R
     Ok(())
 }
 
-unsafe fn position_bottom_center(hwnd: HWND) {
+/// Width for the current overlay state (wider for longer toast messages).
+fn pill_width_for(state: &OverlayState) -> i32 {
+    match state {
+        OverlayState::Toast { message, .. } => {
+            // ~8px per char + padding; clamp to a readable max.
+            let approx = 48 + (message.chars().count() as i32) * 8;
+            approx.clamp(PILL_W_DEFAULT, PILL_W_TOAST_MAX)
+        }
+        _ => PILL_W_DEFAULT,
+    }
+}
+
+unsafe fn position_bottom_center(hwnd: HWND, width: i32) {
     let screen_w = GetSystemMetrics(SM_CXSCREEN);
     let screen_h = GetSystemMetrics(SM_CYSCREEN);
-    let x = (screen_w - PILL_W) / 2;
+    let x = (screen_w - width) / 2;
     let y = screen_h - PILL_H - 48;
-    let _ = MoveWindow(hwnd, x, y, PILL_W, PILL_H, true);
+    let _ = MoveWindow(hwnd, x, y, width, PILL_H, true);
 }
 
 unsafe fn refresh_visibility(hwnd: HWND) {
@@ -238,8 +251,9 @@ unsafe fn refresh_visibility(hwnd: HWND) {
         OverlayState::Hidden => {
             let _ = ShowWindow(hwnd, SW_HIDE);
         }
-        _ => {
-            position_bottom_center(hwnd);
+        ref visible => {
+            let width = pill_width_for(visible);
+            position_bottom_center(hwnd, width);
             // Re-assert TOPMOST on every show so the pill stays above Tauri
             // always-on-top windows (Scratchpad). Z-order among TOPMOST peers
             // is "last SetWindowPos wins".
@@ -281,16 +295,15 @@ unsafe fn paint(hwnd: HWND) {
     let mut ps = windows::Win32::Graphics::Gdi::PAINTSTRUCT::default();
     let hdc = BeginPaint(hwnd, &mut ps);
 
-    let (label, level) = {
-        let state = current_shared()
-            .map(|s| s.state.lock().unwrap().clone())
-            .unwrap_or(OverlayState::Hidden);
-        match state {
-            OverlayState::Hidden => (String::new(), 0.0f32),
-            OverlayState::Recording { level } => ("Recording".to_string(), level),
-            OverlayState::Processing => ("Processing".to_string(), 0.0),
-            OverlayState::Toast { message, .. } => (message, 0.0),
-        }
+    let state = current_shared()
+        .map(|s| s.state.lock().unwrap().clone())
+        .unwrap_or(OverlayState::Hidden);
+    let pill_w = pill_width_for(&state);
+    let (label, level) = match state {
+        OverlayState::Hidden => (String::new(), 0.0f32),
+        OverlayState::Recording { level } => ("Recording".to_string(), level),
+        OverlayState::Processing => ("Processing".to_string(), 0.0),
+        OverlayState::Toast { message, .. } => (message, 0.0),
     };
 
     // Background: RGB(0x1A, 0x1A, 0x22) dark blue-gray, stored as COLORREF 0x00BBGGRR.
@@ -298,7 +311,7 @@ unsafe fn paint(hwnd: HWND) {
     let rect = RECT {
         left: 0,
         top: 0,
-        right: PILL_W,
+        right: pill_w,
         bottom: PILL_H,
     };
     let _ = FillRect(hdc, &rect, brush);
@@ -307,7 +320,7 @@ unsafe fn paint(hwnd: HWND) {
     // Level pulse bar under text when recording.
     // Pulse: RGB(0x60, 0xA0, 0xC8) soft blue, stored as COLORREF 0x00BBGGRR.
     if level > 0.01 {
-        let bar_w = ((PILL_W as f32 - 24.0) * level.clamp(0.0, 1.0)) as i32;
+        let bar_w = ((pill_w as f32 - 24.0) * level.clamp(0.0, 1.0)) as i32;
         let pulse = CreateSolidBrush(COLORREF(0x00C8A060));
         let bar = RECT {
             left: 12,
@@ -347,7 +360,8 @@ unsafe fn paint(hwnd: HWND) {
     let _ = DeleteObject(font.into());
 
     let _ = EndPaint(hwnd, &ps);
-    let _ = (GetDC, ReleaseDC); // referenced for paint path completeness
+    // Keep GDI imports used when paint path is tree-shaken under certain cfgs.
+    let _ = (GetDC, ReleaseDC);
 }
 
 fn wide(s: &str) -> Vec<u16> {

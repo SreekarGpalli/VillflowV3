@@ -1,0 +1,68 @@
+name: Release
+
+# Push a version tag to build and publish villflow.exe:
+#   git tag v0.1.0
+#   git push origin v0.1.0
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    name: Build Windows release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: app/ui/package-lock.json
+
+      - name: Install UI dependencies
+        working-directory: app/ui
+        run: npm ci
+
+      - name: Build production binary (Tauri, no installer bundle)
+        working-directory: app
+        shell: pwsh
+        run: |
+          & .\ui\node_modules\.bin\tauri.cmd build --no-bundle
+          if (-not (Test-Path ..\target\release\villflow.exe)) {
+            throw "villflow.exe not found after build"
+          }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: villflow-windows-x64
+          path: target/release/villflow.exe
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: target/release/villflow.exe
+          generate_release_notes: true
+          body_path: CHANGELOG.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

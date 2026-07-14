@@ -1,20 +1,42 @@
 # Rust
 /target/
 **/*.rs.bk
+*.pdb
 
 # Frontend
 node_modules/
 app/ui/dist/
 
-# Tauri
+# Tauri generated
 app/src-tauri/gen/
 
-# Agent tool state
+# Local / editor / agent tooling
 .grok/
 .opencode/
 .antigravity/
 .claude/
+.cursor/
 .vscode/
+.idea/
+*.swp
+*.swo
+*~
 
-# Misc
+# OS junk
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Secrets & local config (never commit)
+.env
+.env.*
+!.env.example
+**/settings.json
+**/*.corrupt
+
+# Logs
 *.log
+logs/
+
+# Internal notes kept on disk only (not published)
+docs/internal/

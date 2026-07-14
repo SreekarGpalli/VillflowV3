@@ -336,10 +336,10 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
     };
 
     // Empty / silence — do not inject or pollute history.
+    // Toast auto-hides via overlay expiry; do NOT call hide() here (it cancels the toast).
     if raw_transcript.trim().is_empty() {
         inject::force_release_all_modifiers();
         overlay::show_toast(&rt.overlay_tx, "No speech detected");
-        overlay::hide(&rt.overlay_tx);
         rt.set_state(EngineState::Idle);
         return;
     }
@@ -494,6 +494,14 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
             }
         }
     };
+
+    // Empty model output — do not wipe the target field.
+    if final_text.trim().is_empty() {
+        inject::force_release_all_modifiers();
+        overlay::show_toast(&rt.overlay_tx, "Empty result — nothing inserted");
+        rt.set_state(EngineState::Idle);
+        return;
+    }
 
     // Command-edit: if selection is gone at inject time, warn but still insert.
     let had_edit_selection = mode == UtteranceMode::CommandEdit
