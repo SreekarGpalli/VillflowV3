@@ -131,9 +131,9 @@ U1–U9 full package: Setup, nav, keys, Save & apply, status/last error, first-r
 | ID | Decision |
 |----|----------|
 | A1 | Fix: mic from key-down; STT open in parallel |
-| A3 | Fix: release/build path; ship portable **and** installer |
-| A4 | Fix: remove self-inflicted latency (long settles, blocking toast sleeps, avoid needless double Groq when context off) |
-| A5 | Fix: sticky last-good ElevenLabs key |
+| A3 | Fix: release/build path; ship portable **and** installer — **done** (`custom-protocol` + Tauri/CI) |
+| A4 | Fix: remove self-inflicted latency (long settles, blocking toast sleeps, avoid needless double Groq when context off) — **done** |
+| A5 | Fix: sticky last-good ElevenLabs key — **done** |
 
 ---
 

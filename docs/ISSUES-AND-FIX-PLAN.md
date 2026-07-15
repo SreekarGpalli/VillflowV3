@@ -128,7 +128,7 @@ Product decisions                LOCKED
 [x] F1 PRODUCT.md + CONTRACTS updated
 ```
 
-**Implementation status** of code is still `open` until each issue is coded — only *product choices* are locked.
+**Implementation status:** Phase 0–2 items in §6 are implemented; §4 statuses match code as of 2026-07-15. Remaining **accepted** items (C1, C3, C5) are inherent platform limits, not unfinished work.
 
 ---
 
@@ -140,7 +140,7 @@ Product decisions                LOCKED
 
 | Field | Value |
 |-------|--------|
-| **Status** | open |
+| **Status** | done |
 | **Severity** | Critical |
 | **Recommendation** | Fix |
 | **Effort** | M |
@@ -166,7 +166,7 @@ Product decisions                LOCKED
 
 | Field | Value |
 |-------|--------|
-| **Status** | open |
+| **Status** | done |
 | **Severity** | High |
 | **Recommendation** | Fix — implement via **§5 (U1–U9)**, not a one-off toast |
 | **Effort** | M (with full Setup tab) |
@@ -204,7 +204,7 @@ Product decisions                LOCKED
 
 | Field | Value |
 |-------|--------|
-| **Status** | open |
+| **Status** | done |
 | **Severity** | High (feel) / Medium (if text always correct) |
 | **Recommendation** | Fix delays you control; soften hard SLA in docs |
 | **Effort** | S–M |
@@ -230,7 +230,7 @@ Product decisions                LOCKED
 
 | Field | Value |
 |-------|--------|
-| **Status** | open |
+| **Status** | done |
 | **Severity** | Medium–High (multi-key users) |
 | **Recommendation** | Fix |
 | **Effort** | S |
@@ -250,7 +250,7 @@ Product decisions                LOCKED
 
 | Field | Value |
 |-------|--------|
-| **Status** | open (needs decision) |
+| **Status** | done |
 | **Severity** | Product |
 | **Recommendation** | Decide, then implement UX + docs |
 | **Effort** | S–M |
@@ -277,7 +277,7 @@ Product decisions                LOCKED
 
 | Field | Value |
 |-------|--------|
-| **Status** | open (docs only) |
+| **Status** | done |
 | **Severity** | Low (feature is good) |
 | **Recommendation** | **Keep** feature; update contracts |
 | **Effort** | S |
@@ -294,7 +294,7 @@ Product decisions                LOCKED
 
 | Field | Value |
 |-------|--------|
-| **Status** | open |
+| **Status** | done |
 | **Severity** | Medium |
 | **Recommendation** | Improve (simplify) |
 | **Effort** | M |
@@ -317,7 +317,7 @@ Product decisions                LOCKED
 
 | Field | Value |
 |-------|--------|
-| **Status** | open |
+| **Status** | done |
 | **Severity** | Doc honesty |
 | **Recommendation** | Drop as hard requirement |
 | **Effort** | S |
@@ -330,7 +330,7 @@ Product decisions                LOCKED
 
 | Field | Value |
 |-------|--------|
-| **Status** | open |
+| **Status** | done |
 | **Severity** | Low |
 | **Recommendation** | Portable exe primary; installers optional |
 | **Effort** | S |
@@ -345,7 +345,7 @@ Product decisions                LOCKED
 
 | Field | Value |
 |-------|--------|
-| **Status** | open |
+| **Status** | accepted |
 | **Severity** | Medium (inherent) |
 | **Recommendation** | Improve docs + defaults; accept limits |
 | **Effort** | S docs / M per app bug |
@@ -361,7 +361,7 @@ Product decisions                LOCKED
 
 | Field | Value |
 |-------|--------|
-| **Status** | open |
+| **Status** | done |
 | **Severity** | Medium |
 | **Recommendation** | Improve if dual mode (B1-B) |
 | **Effort** | M |
@@ -377,7 +377,7 @@ Product decisions                LOCKED
 
 | Field | Value |
 |-------|--------|
-| **Status** | open |
+| **Status** | accepted |
 | **Severity** | Medium (Scratchpad users) / Low (external-only) |
 | **Recommendation** | Keep AppInsert; improve focus routing if needed |
 | **Effort** | S–M |
@@ -393,7 +393,7 @@ Product decisions                LOCKED
 
 | Field | Value |
 |-------|--------|
-| **Status** | open |
+| **Status** | done |
 | **Severity** | Low |
 | **Recommendation** | Keep feature; prefer default **off** |
 | **Effort** | S |
@@ -407,7 +407,7 @@ Product decisions                LOCKED
 
 | Field | Value |
 |-------|--------|
-| **Status** | open |
+| **Status** | accepted |
 | **Severity** | Low (mostly solid) |
 | **Recommendation** | Keep; small docs/improvements only |
 | **Effort** | S |
@@ -421,7 +421,7 @@ Product decisions                LOCKED
 
 | Field | Value |
 |-------|--------|
-| **Status** | open |
+| **Status** | done |
 | **Severity** | Low–Medium |
 | **Recommendation** | Keep for v1; improve later |
 | **Effort** | M later |
@@ -435,7 +435,7 @@ Product decisions                LOCKED
 
 | Field | Value |
 |-------|--------|
-| **Status** | open |
+| **Status** | done |
 | **Severity** | Low |
 | **Recommendation** | Keep unused for v1 |
 | **Effort** | M if added |
@@ -452,7 +452,7 @@ Issues D1–D2 and A2 are specified end-to-end in **§5 (U1–U9)**. Below is th
 
 | Field | Value |
 |-------|--------|
-| **Status** | open |
+| **Status** | done |
 | **Severity** | High for first-run (not just “Medium polish”) |
 | **Recommendation** | Fix as part of Phase 0 UI (§5 U1–U2) |
 | **Effort** | M |
@@ -466,7 +466,7 @@ Issues D1–D2 and A2 are specified end-to-end in **§5 (U1–U9)**. Below is th
 
 | Field | Value |
 |-------|--------|
-| **Status** | open |
+| **Status** | done |
 | **Severity** | Medium on happy path (keys/mic/hotkeys not applied) |
 | **Recommendation** | Fix as **§5.5 (U4)** |
 | **Effort** | S–M |
@@ -479,9 +479,9 @@ Issues D1–D2 and A2 are specified end-to-end in **§5 (U1–U9)**. Below is th
 
 | Field | Value |
 |-------|--------|
-| **Status** | deferred |
+| **Status** | done |
 | **Severity** | Low |
-| **Recommendation** | Keep current dark theme; no redesign for v1 |
+| **Recommendation** | Google Material 3 dark theme applied (Settings + Scratchpad) |
 
 ---
 
@@ -489,9 +489,9 @@ Issues D1–D2 and A2 are specified end-to-end in **§5 (U1–U9)**. Below is th
 
 | Field | Value |
 |-------|--------|
-| **Status** | deferred |
+| **Status** | done |
 | **Severity** | Low |
-| **Recommendation** | Keep for v1; see §5.8 for minimal Scratchpad UX notes |
+| **Recommendation** | Rewritten as textarea Scratchpad with toolbar + theme match |
 | **Effort** | L if rewritten |
 
 ---
@@ -500,9 +500,9 @@ Issues D1–D2 and A2 are specified end-to-end in **§5 (U1–U9)**. Below is th
 
 | Field | Value |
 |-------|--------|
-| **Status** | deferred |
+| **Status** | done |
 | **Severity** | Medium ethically / Low early OSS |
-| **Recommendation** | Improve later; Phase 0 only needs focusable controls + labels on Setup |
+| **Recommendation** | Basic a11y: roles, labels, focusable nav, keyboard hotkey capture |
 | **Effort** | M |
 
 ---
@@ -511,7 +511,7 @@ Issues D1–D2 and A2 are specified end-to-end in **§5 (U1–U9)**. Below is th
 
 | Field | Value |
 |-------|--------|
-| **Status** | open |
+| **Status** | done |
 | **Severity** | Low |
 | **Recommendation** | Keep tab; not on happy path; fix WPM later |
 | **Effort** | S for metric |
@@ -528,9 +528,9 @@ Issues D1–D2 and A2 are specified end-to-end in **§5 (U1–U9)**. Below is th
 
 | Field | Value |
 |-------|--------|
-| **Status** | open (docs) |
+| **Status** | done |
 | **Severity** | Accepted for model |
-| **Recommendation** | Keep + document; optional DPAPI later |
+| **Recommendation** | DPAPI default + optional passphrase vault (AES-GCM) |
 | **Effort** | S docs / M encrypt |
 
 Path: `%APPDATA%\VillFlow\settings.json`. Never log keys (already a rule).
@@ -541,7 +541,7 @@ Path: `%APPDATA%\VillFlow\settings.json`. Never log keys (already a rule).
 
 | Field | Value |
 |-------|--------|
-| **Status** | open |
+| **Status** | done |
 | **Severity** | Medium (privacy) |
 | **Recommendation** | Keep history + clear; optional auto-retention later |
 | **Effort** | S–M |
@@ -563,7 +563,7 @@ Path: `%APPDATA%\VillFlow\settings.json`. Never log keys (already a rule).
 
 | Field | Value |
 |-------|--------|
-| **Status** | open |
+| **Status** | done |
 | **Severity** | High for maintainers |
 | **Recommendation** | Fix after product decisions |
 | **Effort** | M |
@@ -576,7 +576,7 @@ Path: `%APPDATA%\VillFlow\settings.json`. Never log keys (already a rule).
 
 | Field | Value |
 |-------|--------|
-| **Status** | open |
+| **Status** | done |
 | **Severity** | Process |
 | **Recommendation** | Relax if you are sole maintainer |
 
@@ -588,7 +588,7 @@ Cross-cutting fixes (A1) should touch engine + cloud + UI as needed.
 
 | Field | Value |
 |-------|--------|
-| **Status** | open |
+| **Status** | done |
 | **Severity** | Medium (maintenance) |
 | **Recommendation** | Improve |
 | **Effort** | S checklist / L full e2e |
@@ -690,7 +690,7 @@ About
 
 | ID | Status | Effort | Work |
 |----|--------|--------|------|
-| **U2** | open | S–M | Reorder nav in `app/ui/index.html`; set default active tab to `setup`; move/duplicate essential controls onto Setup |
+| **U2** | done | S–M | Reorder nav in `app/ui/index.html`; set default active tab to `setup`; move/duplicate essential controls onto Setup |
 
 **Files:** `app/ui/index.html` (nav + new `tab-setup`), `app/ui/src/main.ts` (`activeTab`, tab switch, populate/gather).
 
@@ -754,7 +754,7 @@ Wireframe (content, not pixels):
 
 | ID | Status | Effort | Work |
 |----|--------|--------|------|
-| **U1** | open | M | New Setup tab HTML + Ready computation + how-to + embed keys/mic/hotkeys/cleanup |
+| **U1** | done | M | New Setup tab HTML + Ready computation + how-to + embed keys/mic/hotkeys/cleanup |
 
 **Ready logic (frontend, pure):**
 
@@ -789,7 +789,7 @@ Show red/amber banner when `!ready` with the first failing item as the CTA (“A
 
 | ID | Status | Effort |
 |----|--------|--------|
-| **U3** | open | S–M |
+| **U3** | done | S–M |
 
 ---
 
@@ -812,7 +812,7 @@ Do **not** require visiting General or Cloud Keys to complete first-run.
 
 | ID | Status | Effort |
 |----|--------|--------|
-| **U4** | open | S–M |
+| **U4** | done | S–M |
 
 **Files:** `app/ui/src/main.ts` (`saveConfirmBtn`, `gatherFormSettings`, Setup-specific save), `app/src-tauri/src/main.rs` (`save_settings` already applies engine).
 
@@ -831,7 +831,7 @@ Listen to existing events: `engine-state`, `engine-error` (already in `main.ts`)
 
 | ID | Status | Effort |
 |----|--------|--------|
-| **U5** | open | S |
+| **U5** | done | S |
 
 ---
 
@@ -848,7 +848,7 @@ Listen to existing events: `engine-state`, `engine-error` (already in `main.ts`)
 
 | ID | Status | Effort | Depends |
 |----|--------|--------|---------|
-| **U6** | open | S–M | A1 (real Recording), B1 (mode labels) |
+| **U6** | done | S–M | A1 (real Recording), B1 (mode labels) |
 
 **Files:** `crates/vf-engine/src/overlay.rs`, orchestrator state strings.
 
@@ -866,7 +866,7 @@ Optional settings flag: `general.onboarding_complete` or derive from `ready && u
 
 | ID | Status | Effort |
 |----|--------|--------|
-| **U7** | open | S–M |
+| **U7** | done | S–M |
 
 **Files:** `app/src-tauri/src/main.rs` (show/hide on startup), `app/ui` copy, maybe `vf-core` settings field if you persist onboarding.
 
@@ -882,7 +882,7 @@ Optional settings flag: `general.onboarding_complete` or derive from `ready && u
 
 | ID | Status | Effort |
 |----|--------|--------|
-| **U8** | open | S |
+| **U8** | done | S |
 
 ---
 
@@ -898,7 +898,7 @@ Short, always visible on Setup (not only README):
 
 | ID | Status | Effort |
 |----|--------|--------|
-| **U9** | open | S |
+| **U9** | done | S |
 
 ---
 
@@ -1024,7 +1024,7 @@ No new cloud APIs required for Phase 0 UI.
 | C7 | Partial STT on overlay | **done** |
 | E2 | History retention days | **done** |
 | D5 | Basic a11y + issue templates | **done** |
-| E1 | DPAPI key encryption | deferred (plaintext + docs still OK for OSS) |
+| E1 | Key vault (DPAPI + optional passphrase) | **done** |
 | — | README badge OWNER | deferred until real GitHub repo URL known |
 
 ### Phase 3 — security & polish
