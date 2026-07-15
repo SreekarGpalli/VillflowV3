@@ -82,7 +82,6 @@ interface InsightsSummary {
 
 let savedSettings: Settings | null = null;
 let currentSettings: Settings | null = null;
-let activeTab = "overview";
 let editingWordId: number | null = null;
 let historyOffset = 0;
 const historyLimit = 15;
@@ -176,8 +175,6 @@ function setupTabs() {
     (item as HTMLElement).tabIndex = 0;
     const targetContent = document.getElementById(`tab-${tab}`);
     if (targetContent) targetContent.classList.add("active");
-
-    activeTab = tab;
 
     if (tab === "dictionary") {
       await loadDictionary();

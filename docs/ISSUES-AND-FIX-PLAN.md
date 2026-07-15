@@ -186,22 +186,15 @@ Product decisions                LOCKED
 
 | Field | Value |
 |-------|--------|
-| **Status** | open |
+| **Status** | done |
 | **Severity** | High |
 | **Recommendation** | Fix |
 | **Effort** | S (docs) / M (CI) |
-| **Where** | [README.md](../README.md), [docs/PUBLISHING.md](PUBLISHING.md), `app/src-tauri/tauri.conf.json`, GitHub Actions |
+| **Where** | [README.md](../README.md), [docs/PUBLISHING.md](PUBLISHING.md), `app/src-tauri/Cargo.toml`, `app/src-tauri/tauri.conf.json`, GitHub Actions |
 
-**Problem:** Plain `cargo build` loads `devUrl` (localhost:5173) → blank WebView / connection refused. Production requires Tauri CLI so UI is embedded. Bundle config may still imply full installers; product intent is portable exe.
+**Problem (historical):** Without Tauri `custom-protocol`, release binaries loaded `devUrl` (`localhost:5173`) → blank WebView / connection refused unless Vite was running.
 
-**Why it matters (OSS):** GitHub *is* distribution.
-
-**How to fix:**
-
-1. Document one path only: `tauri build` (or a root `build.ps1`).
-2. GitHub Actions (Windows): build and attach `villflow.exe` (+ checksum) to Releases.
-3. Primary artifact: portable exe. MSI/NSIS optional, not required.
-4. Fix README `OWNER` placeholders when the real repo exists (see PUBLISHING.md).
+**Fix landed:** `app/src-tauri/Cargo.toml` defaults to `custom-protocol` so `cargo build --release -p villflow` embeds `frontendDist` (`app/ui/dist`). Prefer `tauri build` for installers + automatic UI rebuild. Portable exe + optional MSI/NSIS; CI attach to Releases.
 
 **Done when:** A stranger can install from Releases (or follow one build command) and see the real UI without a Vite dev server.
 

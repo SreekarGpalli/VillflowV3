@@ -16,7 +16,7 @@ Windows 11 push-to-talk voice dictation, tray-resident, open source / free / no 
 
 **Latency:** best effort only — **no hard millisecond SLA**. Remove artificial delays in code; typical cloud path may be ~0.5–2s depending on network. Cleanup level `none` skips the LLM entirely (fastest).
 
-**Distribution:** GitHub Releases ship **portable `villflow.exe` and a Windows installer** (Tauri bundle). Production UI requires Tauri build (embedded frontend), not plain `cargo build` alone.
+**Distribution:** GitHub Releases ship **portable `villflow.exe` and a Windows installer** (Tauri bundle). Production UI is embedded via the default `custom-protocol` feature (`frontendDist`); prefer `tauri build` so the UI is rebuilt automatically.
 
 ## 2. Non-goals — DO NOT BUILD
 

@@ -44,7 +44,7 @@ ui\node_modules\.bin\tauri.cmd build --no-bundle
 # → target\release\villflow.exe
 ```
 
-> Plain `cargo build` alone does **not** embed the frontend. Always use the Tauri CLI for a runnable release binary.
+> `cargo build --release -p villflow` embeds the frontend when `app/ui/dist` exists and the default `custom-protocol` feature is enabled. Prefer `tauri build` so `beforeBuildCommand` rebuilds the UI for you.
 
 ## Project layout
 

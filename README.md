@@ -82,7 +82,7 @@ ui\node_modules\.bin\tauri.cmd build
 
 GitHub Releases should attach **both** `villflow.exe` and the installer when possible.
 
-> ⚠️ **Do not use plain `cargo build` for the app.** That binary expects the Vite dev server (`localhost:5173`) and will show *connection refused* without it. Always build through the Tauri CLI so the UI is embedded.
+> **UI embed:** The app crate defaults to Tauri’s `custom-protocol` feature, so `cargo build --release -p villflow` embeds `app/ui/dist` (run `npm run build` in `app/ui` first, or use the Tauri CLI which runs that automatically). Prefer `tauri build` for installers and a one-command release.
 
 ### First-run
 
