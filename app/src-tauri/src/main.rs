@@ -154,12 +154,37 @@ fn validate_hotkeys(settings: &Settings) -> Result<(), String> {
 
 #[tauri::command]
 fn save_settings(
-    settings: Settings,
+    mut settings: Settings,
     settings_state: State<'_, AppSettings>,
     _store: State<'_, Arc<SqliteStore>>,
     engine: State<'_, EngineHandle>,
 ) -> Result<(), String> {
     validate_hotkeys(&settings)?;
+
+    // Preserve vault sealed blob if the UI omitted it; avoid wiping passphrase vault.
+    {
+        let state = settings_state.0.lock().unwrap();
+        if matches!(settings.vault.mode, vf_core::VaultMode::Passphrase)
+            && settings.vault.sealed.is_none()
+        {
+            settings.vault.sealed = state.vault.sealed.clone();
+        }
+        // If passphrase session is active but form sent empty keys, keep in-memory keys.
+        if matches!(settings.vault.mode, vf_core::VaultMode::Passphrase)
+            && vf_store::vault_session_active()
+            && settings.stt.api_keys.iter().all(|k| k.trim().is_empty())
+            && !state.stt.api_keys.is_empty()
+        {
+            settings.stt.api_keys = state.stt.api_keys.clone();
+        }
+        if matches!(settings.vault.mode, vf_core::VaultMode::Passphrase)
+            && vf_store::vault_session_active()
+            && settings.llm.api_key.trim().is_empty()
+            && !state.llm.api_key.trim().is_empty()
+        {
+            settings.llm.api_key = state.llm.api_key.clone();
+        }
+    }
 
     let settings_path = vf_store::get_default_settings_path()
         .ok_or_else(|| "Could not resolve settings path".to_string())?;

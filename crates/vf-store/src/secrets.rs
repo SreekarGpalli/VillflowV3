@@ -48,7 +48,7 @@ pub fn protect_secret_dpapi(plain: &str) -> anyhow::Result<String> {
     }
 
     let mut bytes = plain.as_bytes().to_vec();
-    let mut blob_in = CRYPT_INTEGER_BLOB {
+    let blob_in = CRYPT_INTEGER_BLOB {
         cbData: bytes.len() as u32,
         pbData: bytes.as_mut_ptr(),
     };
@@ -56,7 +56,7 @@ pub fn protect_secret_dpapi(plain: &str) -> anyhow::Result<String> {
 
     unsafe {
         CryptProtectData(
-            &mut blob_in,
+            &blob_in,
             PCWSTR::null(),
             None,
             None,
@@ -89,7 +89,7 @@ pub fn unprotect_secret_dpapi(stored: &str) -> anyhow::Result<String> {
         .decode(b64)
         .map_err(|e| anyhow::anyhow!("DPAPI blob base64 decode failed: {e}"))?;
 
-    let mut blob_in = CRYPT_INTEGER_BLOB {
+    let blob_in = CRYPT_INTEGER_BLOB {
         cbData: encrypted.len() as u32,
         pbData: encrypted.as_mut_ptr(),
     };
@@ -97,7 +97,7 @@ pub fn unprotect_secret_dpapi(stored: &str) -> anyhow::Result<String> {
 
     unsafe {
         CryptUnprotectData(
-            &mut blob_in,
+            &blob_in,
             None,
             None,
             None,
@@ -250,6 +250,14 @@ pub fn vault_enable_passphrase(settings: &mut Settings, passphrase: &str) -> any
 
 /// Switch back to DPAPI (keys must already be in memory).
 pub fn vault_enable_dpapi(settings: &mut Settings) -> anyhow::Result<()> {
+    // Require unlocked keys if a sealed vault exists — otherwise we would wipe secrets.
+    if settings.vault.sealed.is_some()
+        && settings.stt.api_keys.iter().all(|k| k.trim().is_empty())
+        && settings.llm.api_key.trim().is_empty()
+        && !vault_session_active()
+    {
+        anyhow::bail!("Unlock the vault before switching to DPAPI");
+    }
     settings.vault.mode = VaultMode::Dpapi;
     settings.vault.sealed = None;
     vault_clear_session();
