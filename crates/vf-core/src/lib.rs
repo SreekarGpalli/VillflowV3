@@ -221,6 +221,50 @@ fn default_history_retention_days() -> u32 {
     0
 } // 0 = keep forever
 
+/// How API keys are protected on disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum VaultMode {
+    /// Windows DPAPI — bound to this user profile (default).
+    #[default]
+    Dpapi,
+    /// AES-GCM sealed blob unlockable with a passphrase (portable across PCs).
+    Passphrase,
+}
+
+fn default_vault_mode() -> VaultMode {
+    VaultMode::Dpapi
+}
+
+/// Sealed passphrase vault payload (ciphertext of keys). Never log contents.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct VaultSealed {
+    #[serde(default)]
+    pub salt_b64: String,
+    #[serde(default)]
+    pub nonce_b64: String,
+    #[serde(default)]
+    pub ciphertext_b64: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VaultSettings {
+    #[serde(default = "default_vault_mode")]
+    pub mode: VaultMode,
+    /// Present when `mode == Passphrase`. Keys live here on disk, not in stt/llm fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sealed: Option<VaultSealed>,
+}
+
+impl Default for VaultSettings {
+    fn default() -> Self {
+        Self {
+            mode: VaultMode::Dpapi,
+            sealed: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GeneralSettings {
     #[serde(default = "default_false")]
@@ -386,6 +430,8 @@ pub struct Settings {
     #[serde(default)]
     pub general: GeneralSettings,
     #[serde(default)]
+    pub vault: VaultSettings,
+    #[serde(default)]
     pub hotkeys: HotkeysSettings,
     #[serde(default)]
     pub audio: AudioSettings,
@@ -406,6 +452,7 @@ impl Default for Settings {
         Self {
             version: default_version(),
             general: GeneralSettings::default(),
+            vault: VaultSettings::default(),
             hotkeys: HotkeysSettings::default(),
             audio: AudioSettings::default(),
             stt: SttSettings::default(),

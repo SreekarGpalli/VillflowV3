@@ -28,7 +28,16 @@ VillFlow stores settings and API keys **only on your machine**:
 | `%APPDATA%\VillFlow\villflow.db` | Dictionary, history, scratchpad |
 | `%APPDATA%\VillFlow\logs\villflow.log` | Application logs (keys are never logged) |
 
-API keys are held in memory as plaintext while the app runs (needed for ElevenLabs / Groq). On disk they are wrapped as `vfdpapi1:` + DPAPI ciphertext. Older plaintext keys are accepted once and re-encrypted on the next save. DPAPI secrets are bound to your Windows user profile — they will not decrypt under a different account.
+API keys are held in memory as plaintext while the app runs (needed for ElevenLabs / Groq).
+
+**At rest (choose one vault mode in General):**
+
+| Mode | Behavior |
+|------|----------|
+| **DPAPI** (default) | Per-key `vfdpapi1:` + Windows DPAPI. Bound to your Windows user profile. |
+| **Passphrase** | AES-256-GCM sealed blob (PBKDF2-HMAC-SHA256). Portable if you remember the passphrase — use when moving settings to another PC. |
+
+Legacy plaintext keys are accepted once and re-protected on the next save.
 
 **Never** commit `settings.json`, API keys, or copies of `%APPDATA%\VillFlow\` into this repository.
 

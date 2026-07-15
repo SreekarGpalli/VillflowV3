@@ -7,23 +7,30 @@
 
   <style>
     :root {
-      --bg-dark: #131314;
-      --bg-gradient: #131314;
-      --bg-sidebar: #1e1f20;
-      --bg-card: #1e1f20;
-      --bg-card-hover: #2d2f31;
-      --border-color: #444746;
-      --border-color-focus: #a8c7fa;
-      --text-main: #e3e3e3;
-      --text-muted: #c4c7c5;
-      --text-disabled: #8e918f;
-      --accent: #a8c7fa;
-      --accent-hover: #8ab4f8;
-      --accent-gradient: linear-gradient(135deg, #a8c7fa 0%, #8ab4f8 100%);
-      --accent-glow: rgba(168, 199, 250, 0.15);
-      --danger: #f28b82;
-      --danger-hover: #ee675c;
-      --success: #81c995;
+      --bg-dark: #0b0d12;
+      --bg-sidebar: #0f1219;
+      --bg-card: #141924;
+      --bg-card-hover: #1a2030;
+      --bg-elevated: #1c2433;
+      --border-color: rgba(255, 255, 255, 0.08);
+      --border-strong: rgba(255, 255, 255, 0.14);
+      --border-color-focus: #5eead4;
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --text-disabled: #64748b;
+      --accent: #2dd4bf;
+      --accent-hover: #5eead4;
+      --accent-soft: rgba(45, 212, 191, 0.12);
+      --accent-gradient: linear-gradient(135deg, #2dd4bf 0%, #38bdf8 100%);
+      --accent-glow: rgba(45, 212, 191, 0.18);
+      --danger: #fb7185;
+      --danger-hover: #fda4af;
+      --success: #4ade80;
+      --radius-sm: 10px;
+      --radius-md: 14px;
+      --radius-lg: 20px;
+      --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.35);
+      --font: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
     }
 
     * {
@@ -33,12 +40,16 @@
     }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      background: var(--bg-dark);
+      font-family: var(--font);
+      background:
+        radial-gradient(1200px 600px at 10% -10%, rgba(45, 212, 191, 0.08), transparent 50%),
+        radial-gradient(900px 500px at 100% 0%, rgba(56, 189, 248, 0.06), transparent 45%),
+        var(--bg-dark);
       color: var(--text-main);
       height: 100vh;
       overflow: hidden;
       display: flex;
+      letter-spacing: 0.01em;
     }
 
     /* Modern Custom Scrollbars */
@@ -63,16 +74,17 @@
 
     /* Layout structure */
     .sidebar {
-      width: 250px;
-      background: var(--bg-sidebar);
+      width: 240px;
+      background: linear-gradient(180deg, var(--bg-sidebar) 0%, #0c1018 100%);
       border-right: 1px solid var(--border-color);
       display: flex;
       flex-direction: column;
       z-index: 10;
+      backdrop-filter: blur(20px);
     }
 
     .logo-section {
-      padding: 24px;
+      padding: 22px 20px;
       display: flex;
       align-items: center;
       gap: 12px;
@@ -80,22 +92,23 @@
     }
 
     .logo-badge {
-      width: 34px;
-      height: 34px;
+      width: 36px;
+      height: 36px;
       background: var(--accent-gradient);
-      border-radius: 50%;
+      border-radius: 12px;
       display: flex;
       align-items: center;
       justify-content: center;
       font-weight: 800;
-      font-size: 16px;
-      color: #042f66;
+      font-size: 15px;
+      color: #042f2e;
+      box-shadow: 0 4px 16px var(--accent-glow);
     }
 
     .logo-name {
-      font-size: 20px;
-      font-weight: 800;
-      letter-spacing: -0.5px;
+      font-size: 18px;
+      font-weight: 750;
+      letter-spacing: -0.4px;
       background: var(--accent-gradient);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
@@ -103,10 +116,10 @@
 
     .nav-list {
       list-style: none;
-      padding: 16px 12px;
+      padding: 14px 10px;
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: 2px;
       overflow-y: auto;
       flex: 1;
     }
@@ -114,24 +127,30 @@
     .nav-item {
       display: flex;
       align-items: center;
-      padding: 10px 20px;
-      border-radius: 20px;
-      font-size: 14px;
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-size: 13.5px;
       font-weight: 500;
       color: var(--text-muted);
       cursor: pointer;
-      transition: all 0.2s ease;
+      transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+      outline: none;
     }
 
     .nav-item:hover {
-      background: rgba(255, 255, 255, 0.05);
+      background: rgba(255, 255, 255, 0.04);
       color: var(--text-main);
     }
 
+    .nav-item:focus-visible {
+      box-shadow: 0 0 0 2px var(--accent-soft), 0 0 0 3px var(--accent);
+    }
+
     .nav-item.active {
-      background: #004a77;
-      color: #c2e7ff;
+      background: var(--accent-soft);
+      color: var(--accent-hover);
       font-weight: 600;
+      box-shadow: inset 0 0 0 1px rgba(45, 212, 191, 0.2);
     }
 
     .sidebar-footer {
@@ -185,37 +204,33 @@
 
     /* Cards */
     .card {
-      background: rgba(22, 24, 40, 0.45);
-      border: 1px solid rgba(255, 255, 255, 0.06);
-      border-radius: 16px;
-      padding: 28px;
-      backdrop-filter: blur(25px);
-      box-shadow: 
-        0 4px 24px rgba(0, 0, 0, 0.3),
-        inset 0 1px 0 rgba(255, 255, 255, 0.08),
-        inset 0 -1px 0 rgba(0, 0, 0, 0.2);
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      padding: 22px 24px;
+      box-shadow: var(--shadow-card);
       display: flex;
       flex-direction: column;
-      gap: 24px;
-      transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+      gap: 18px;
+      transition: border-color 0.2s ease, transform 0.2s ease;
     }
 
     .card:hover {
-      background: var(--bg-card-hover);
-      border-color: #5f6368;
+      border-color: var(--border-strong);
     }
 
     .card-title {
-      font-size: 15px;
-      font-weight: 600;
-      letter-spacing: -0.01em;
-      color: var(--text-main);
+      font-size: 13px;
+      font-weight: 650;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--text-muted);
       display: flex;
       align-items: center;
       gap: 8px;
       border-bottom: 1px solid var(--border-color);
-      padding-bottom: 16px;
-      margin-bottom: 8px;
+      padding-bottom: 12px;
+      margin-bottom: 2px;
     }
 
     /* Form Controls */
@@ -962,6 +977,19 @@
   <!-- Toast Container -->
   <div class="toast-container" id="toast-container"></div>
 
+  <!-- Vault unlock modal -->
+  <div id="vault-unlock-modal" style="display:none; position:fixed; inset:0; z-index:2000; background:rgba(0,0,0,0.65); backdrop-filter:blur(8px); align-items:center; justify-content:center;">
+    <div class="card" style="width:min(420px, 92vw); margin:auto; gap:14px;">
+      <div class="card-title">Unlock key vault</div>
+      <p style="font-size:13px; color:var(--text-muted);">Enter your vault passphrase to load API keys.</p>
+      <input type="password" id="vault-unlock-input" placeholder="Passphrase" autocomplete="current-password">
+      <div style="display:flex; gap:8px; justify-content:flex-end;">
+        <button class="btn btn-primary" type="button" id="vault-unlock-submit">Unlock</button>
+      </div>
+      <p id="vault-unlock-error" style="font-size:12px; color:var(--danger); min-height:1.2em;"></p>
+    </div>
+  </div>
+
   <!-- Sidebar -->
   <aside class="sidebar" aria-label="Main navigation">
     <div class="logo-section">
@@ -1173,6 +1201,25 @@
             Older transcripts are removed automatically after each dictation when a limit is set.
           </p>
         </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Key vault</div>
+        <p style="font-size: 13px; color: var(--text-muted);">
+          <strong id="vault-mode-label">DPAPI (this Windows user)</strong>
+          <span id="vault-status-detail" style="display:block; margin-top:6px; color: var(--text-disabled); font-size: 12px;"></span>
+        </p>
+        <div class="form-group">
+          <label for="vault-passphrase">Passphrase (portable vault)</label>
+          <input type="password" id="vault-passphrase" placeholder="Min 8 characters" autocomplete="new-password">
+        </div>
+        <div style="display:flex; flex-wrap:wrap; gap:8px;">
+          <button class="btn btn-primary" type="button" id="vault-enable-passphrase-btn">Use passphrase vault</button>
+          <button class="btn" type="button" id="vault-enable-dpapi-btn">Use DPAPI (this PC)</button>
+          <button class="btn" type="button" id="vault-unlock-btn">Unlock vault</button>
+        </div>
+        <p style="font-size: 12px; color: var(--text-disabled);">
+          Passphrase mode encrypts keys so you can copy settings to another PC. DPAPI is automatic for this Windows user.
+        </p>
       </div>
     </div>
 

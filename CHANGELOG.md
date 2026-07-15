@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Redesign & vault (Phase 5)
+
+- **UI redesign**: teal accent system, refined sidebar/cards, clearer hierarchy
+- **Scratchpad rewrite**: plain-text `textarea` (reliable dictation), Markdown toolbar helpers
+- **Portable vault**: passphrase AES-GCM sealed keys (cross-PC) in addition to default Windows DPAPI
+- GitHub badges / links use `SreekarGpalli/VillflowV3`
+
 ### Final polish (Phase 4)
 
 - README / clone / badges point at `SreekarGpalli/VillflowV3`

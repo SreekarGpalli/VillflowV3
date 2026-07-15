@@ -17,7 +17,7 @@ Implementers and agents: if CONTRACTS conflicts with this file, **follow PRODUCT
 | Accounts | None |
 | Distribution | GitHub: **portable `villflow.exe` + installer** (both) |
 | Setup | User pastes own ElevenLabs + Groq API keys on their PC |
-| Privacy | Local settings/DB/logs; no telemetry; no cloud accounts. API keys encrypted at rest with Windows DPAPI (current user). |
+| Privacy | Local settings/DB/logs; no telemetry; no cloud accounts. API keys: DPAPI (default) or portable passphrase vault (AES-GCM). |
 | Primary goal | Download → Setup → keys → hold hotkey → speak → text at cursor |
 
 **v1 happy path:** Fresh machine → install or run exe → Setup → Ready → dictate into Notepad.

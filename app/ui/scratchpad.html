@@ -6,182 +6,119 @@
   <title>Scratchpad</title>
   <style>
     :root {
-      --bg-dark: #131314;
-      --bg-panel: #1e1f20;
-      --border-color: #444746;
-      --text-main: #e3e3e3;
-      --text-muted: #c4c7c5;
-      --text-disabled: #8e918f;
-      --accent: #a8c7fa;
-      --accent-hover: #8ab4f8;
-      --success: #81c995;
-      --danger: #f28b82;
+      --bg: #0b0d12;
+      --panel: #141924;
+      --border: rgba(255,255,255,0.08);
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+      --disabled: #64748b;
+      --accent: #2dd4bf;
+      --success: #4ade80;
+      --danger: #fb7185;
+      --font: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
     }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
+    * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      background: var(--bg-dark);
-      color: var(--text-main);
+      font-family: var(--font);
+      background:
+        radial-gradient(800px 400px at 20% 0%, rgba(45,212,191,0.08), transparent 50%),
+        var(--bg);
+      color: var(--text);
       height: 100vh;
       display: flex;
       flex-direction: column;
       overflow: hidden;
-      position: relative;
     }
-
-    /* Toolbar Styling (Floating Island) */
-    .toolbar {
-      background: var(--bg-panel);
-      border: 1px solid var(--border-color);
-      padding: 8px 16px;
+    .topbar {
       display: flex;
-      gap: 10px;
       align-items: center;
-      position: absolute;
-      top: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      border-radius: 20px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-      z-index: 10;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(15,18,25,0.9);
+      backdrop-filter: blur(12px);
+      -webkit-app-region: drag;
     }
-
+    .topbar h1 {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .toolbar {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      -webkit-app-region: no-drag;
+    }
     .tool-btn {
       background: transparent;
       border: 1px solid transparent;
-      color: var(--text-muted);
-      width: 28px;
-      height: 28px;
-      padding: 0;
-      border-radius: 50%;
+      color: var(--muted);
+      min-width: 32px;
+      height: 32px;
+      padding: 0 8px;
+      border-radius: 8px;
       cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.2s ease;
+      font-size: 12px;
+      font-weight: 600;
+      font-family: inherit;
     }
-
     .tool-btn:hover {
-      background: rgba(255, 255, 255, 0.06);
-      color: var(--text-main);
+      background: rgba(255,255,255,0.06);
+      color: var(--text);
+      border-color: var(--border);
     }
-
-    .tool-btn:active {
-      transform: scale(0.92);
+    .tool-btn:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
     }
-
-    .tool-btn.bold {
-      font-weight: 800;
-    }
-
-    .tool-btn.italic {
-      font-style: italic;
-    }
-
-    /* Editor Area */
-    .editor-container {
+    .editor-wrap {
       flex: 1;
-      padding: 88px 32px 32px 32px; /* Space for the floating toolbar */
-      overflow-y: auto;
-      background: transparent;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      padding: 16px 20px 8px;
+    }
+    #scratchpad-editor {
+      flex: 1;
+      width: 100%;
+      min-height: 0;
+      resize: none;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--panel);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 15px;
+      line-height: 1.65;
+      padding: 18px 20px;
       outline: none;
-      z-index: 1;
+      box-shadow: 0 8px 28px rgba(0,0,0,0.25);
     }
-
-    .editor {
-      min-height: 100%;
-      outline: none;
-      font-size: 16px;
-      line-height: 1.7;
-      color: #e3e3e3;
-      max-width: 800px;
-      margin: 0 auto;
+    #scratchpad-editor:focus {
+      border-color: rgba(45,212,191,0.45);
+      box-shadow: 0 0 0 1px rgba(45,212,191,0.25), 0 8px 28px rgba(0,0,0,0.25);
     }
-
-    .editor[contenteditable="true"]:empty:before {
-      content: attr(placeholder);
-      color: var(--text-disabled);
-      opacity: 0.5;
-      cursor: text;
-    }
-
-    /* Custom Scrollbar */
-    ::-webkit-scrollbar {
-      width: 6px;
-      height: 6px;
-    }
-
-    ::-webkit-scrollbar-track {
-      background: transparent;
-    }
-
-    ::-webkit-scrollbar-thumb {
-      background: rgba(255, 255, 255, 0.08);
-      border-radius: 3px;
-      transition: background 0.2s ease;
-    }
-
-    ::-webkit-scrollbar-thumb:hover {
-      background: rgba(255, 255, 255, 0.18);
-    }
-
+    #scratchpad-editor::placeholder { color: var(--disabled); }
     .status-bar {
       font-size: 11px;
-      color: var(--text-muted);
-      padding: 12px 24px;
-      border-top: 1px solid var(--border-color);
-      background: rgba(0, 0, 0, 0.2);
+      color: var(--muted);
+      padding: 10px 20px 14px;
       display: flex;
       justify-content: space-between;
       align-items: center;
     }
-
-    #save-status {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      font-weight: 500;
-    }
-
-    #save-status::before {
-      content: "";
-      display: inline-block;
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: #9ca3af;
-      transition: all 0.2s ease;
-    }
-
     #save-status.status-saved { color: var(--success); }
-    #save-status.status-saved::before { background: var(--success); box-shadow: 0 0 6px var(--success); }
-
-    @keyframes pulse {
-      0% { transform: scale(1); opacity: 1; }
-      50% { transform: scale(1.3); opacity: 0.5; }
-      100% { transform: scale(1); opacity: 1; }
-    }
-
     #save-status.status-saving { color: #fbbf24; }
-    #save-status.status-saving::before { background: #fbbf24; box-shadow: 0 0 6px #fbbf24; animation: pulse 1.5s infinite; }
-
     #save-status.status-unsaved { color: #f97316; }
-    #save-status.status-unsaved::before { background: #f97316; box-shadow: 0 0 6px #f97316; }
-
     #save-status.status-error { color: var(--danger); }
-    #save-status.status-error::before { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
-
-    /* In-window dictation status (Flow Bar can sit under always-on-top Scratchpad). */
     .dictation-pill {
       display: none;
       position: absolute;
-      bottom: 52px;
+      bottom: 48px;
       left: 50%;
       transform: translateX(-50%);
       z-index: 20;
@@ -189,89 +126,55 @@
       gap: 10px;
       padding: 10px 18px;
       border-radius: 999px;
-      background: rgba(26, 26, 34, 0.94);
-      border: 1px solid rgba(168, 199, 250, 0.35);
-      color: #f0f0f0;
+      background: rgba(20, 25, 36, 0.95);
+      border: 1px solid rgba(45, 212, 191, 0.35);
+      color: var(--text);
       font-size: 13px;
       font-weight: 600;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.45);
       pointer-events: none;
     }
-    .dictation-pill.visible {
-      display: inline-flex;
-    }
+    .dictation-pill.visible { display: flex; }
     .dictation-pill .dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #9ca3af;
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
     }
-    .dictation-pill.recording .dot {
-      background: #f87171;
-      box-shadow: 0 0 10px #f87171;
-      animation: pulse 1s infinite;
-    }
-    .dictation-pill.processing .dot,
-    .dictation-pill.injecting .dot {
-      background: #fbbf24;
-      box-shadow: 0 0 10px #fbbf24;
-      animation: pulse 1.2s infinite;
-    }
-    .dictation-pill .level {
-      width: 64px;
-      height: 4px;
-      border-radius: 2px;
-      background: rgba(255, 255, 255, 0.08);
-      overflow: hidden;
-    }
-    .dictation-pill .level > i {
-      display: block;
-      height: 100%;
-      width: 0%;
-      background: #60a0c8;
-      transition: width 0.08s linear;
-    }
+    .dictation-pill.recording .dot { background: #f87171; box-shadow: 0 0 8px #f87171; }
+    .dictation-pill.processing .dot { background: #fbbf24; box-shadow: 0 0 8px #fbbf24; }
   </style>
 </head>
 <body>
-  <!-- Minimal Text Styling Toolbar -->
-  <div class="toolbar">
-    <button class="tool-btn bold" id="btn-bold" title="Bold">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"></path><path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"></path></svg>
-    </button>
-    <button class="tool-btn italic" id="btn-italic" title="Italic">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="4" x2="10" y2="4"></line><line x1="14" y1="20" x2="5" y2="20"></line><line x1="15" y1="4" x2="9" y2="20"></line></svg>
-    </button>
-    <button class="tool-btn" id="btn-bullets" title="Bullet list" type="button">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
-    </button>
-    <button class="tool-btn" id="btn-numbers" title="Numbered list" type="button">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="10" y1="6" x2="21" y2="6"></line><line x1="10" y1="12" x2="21" y2="12"></line><line x1="10" y1="18" x2="21" y2="18"></line><path d="M4 6h1v4"/><path d="M4 10h2"/><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/></svg>
-    </button>
-    <button class="tool-btn" id="btn-undo" title="Undo" type="button">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6.7 3L3 13"/></svg>
-    </button>
-    <button class="tool-btn" id="btn-clear" title="Clear all" type="button" style="color: var(--danger);">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-    </button>
-  </div>
+  <header class="topbar">
+    <h1>Scratchpad</h1>
+    <div class="toolbar" role="toolbar" aria-label="Formatting">
+      <button class="tool-btn" type="button" id="btn-bold" title="Bold (Markdown)">B</button>
+      <button class="tool-btn" type="button" id="btn-italic" title="Italic (Markdown)"><i>I</i></button>
+      <button class="tool-btn" type="button" id="btn-bullets" title="Bullet line">• List</button>
+      <button class="tool-btn" type="button" id="btn-numbers" title="Numbered line">1. List</button>
+      <button class="tool-btn" type="button" id="btn-undo" title="Undo">Undo</button>
+      <button class="tool-btn" type="button" id="btn-clear" title="Clear all">Clear</button>
+    </div>
+  </header>
 
   <div class="dictation-pill" id="dictation-pill" aria-live="polite">
     <span class="dot"></span>
     <span class="label" id="dictation-pill-label">Recording</span>
-    <span class="level" id="dictation-level" hidden><i></i></span>
   </div>
 
-  <!-- Editable Document Area -->
-  <div class="editor-container">
-    <div class="editor" id="scratchpad-editor" contenteditable="true" placeholder="Start typing here..."></div>
+  <div class="editor-wrap">
+    <textarea
+      id="scratchpad-editor"
+      placeholder="Dictate or type here. Markdown-style formatting helpers are on the toolbar."
+      spellcheck="true"
+      aria-label="Scratchpad notes"
+    ></textarea>
   </div>
 
-  <!-- Status Bar -->
-  <div class="status-bar">
+  <footer class="status-bar">
     <span id="save-status" class="status-saved">Saved</span>
     <span id="word-count">0 words</span>
-  </div>
+  </footer>
 
   <script type="module" src="/src/scratchpad.ts"></script>
 </body>

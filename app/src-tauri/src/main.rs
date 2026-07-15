@@ -218,6 +218,55 @@ fn dictionary_export(store: State<'_, Arc<SqliteStore>>) -> Result<String, Strin
 }
 
 #[tauri::command]
+fn vault_status(settings_state: State<'_, AppSettings>) -> Result<serde_json::Value, String> {
+    let s = settings_state.0.lock().unwrap();
+    Ok(serde_json::json!({
+        "mode": match s.vault.mode {
+            vf_core::VaultMode::Dpapi => "dpapi",
+            vf_core::VaultMode::Passphrase => "passphrase",
+        },
+        "needs_unlock": vf_store::vault_needs_unlock(&s),
+        "session_active": vf_store::vault_session_active(),
+        "has_sealed": s.vault.sealed.is_some(),
+    }))
+}
+
+#[tauri::command]
+fn vault_unlock(
+    passphrase: String,
+    settings_state: State<'_, AppSettings>,
+    engine: State<'_, EngineHandle>,
+) -> Result<(), String> {
+    let mut s = settings_state.0.lock().unwrap();
+    vf_store::vault_unlock(&mut s, &passphrase).map_err(|e| e.to_string())?;
+    let _ = engine.send(vf_core::EngineCmd::ApplySettings(Box::new(s.clone())));
+    Ok(())
+}
+
+#[tauri::command]
+fn vault_enable_passphrase(
+    passphrase: String,
+    settings_state: State<'_, AppSettings>,
+) -> Result<(), String> {
+    let mut s = settings_state.0.lock().unwrap();
+    vf_store::vault_enable_passphrase(&mut s, &passphrase).map_err(|e| e.to_string())?;
+    let path = vf_store::get_default_settings_path()
+        .ok_or_else(|| "Could not resolve settings path".to_string())?;
+    vf_store::save_settings(&s, &path).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn vault_enable_dpapi(settings_state: State<'_, AppSettings>) -> Result<(), String> {
+    let mut s = settings_state.0.lock().unwrap();
+    vf_store::vault_enable_dpapi(&mut s).map_err(|e| e.to_string())?;
+    let path = vf_store::get_default_settings_path()
+        .ok_or_else(|| "Could not resolve settings path".to_string())?;
+    vf_store::save_settings(&s, &path).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 fn dictionary_list(store: State<'_, Arc<SqliteStore>>) -> Result<Vec<DictEntry>, String> {
     store.dictionary_list().map_err(|e| e.to_string())
 }
@@ -632,6 +681,10 @@ fn main() {
             history_clear,
             history_export,
             dictionary_export,
+            vault_status,
+            vault_unlock,
+            vault_enable_passphrase,
+            vault_enable_dpapi,
             insights_summary,
             scratchpad_get,
             scratchpad_set,

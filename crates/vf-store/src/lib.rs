@@ -6,7 +6,10 @@ use vf_core::{
 };
 
 mod secrets;
-pub use secrets::{protect_secret, unprotect_secret};
+pub use secrets::{
+    protect_secret, unprotect_secret, vault_clear_session, vault_enable_dpapi,
+    vault_enable_passphrase, vault_needs_unlock, vault_session_active, vault_unlock,
+};
 
 // --- SETTINGS LOAD / SAVE ---
 
@@ -24,32 +27,28 @@ pub fn load_settings(path: &Path) -> anyhow::Result<Settings> {
         save_settings(&settings, path)?;
         return Ok(settings);
     }
-    
+
     let content = fs::read_to_string(path)?;
-    // If JSON is empty, fallback to default
     if content.trim().is_empty() {
         let settings = Settings::default();
         save_settings(&settings, path)?;
         return Ok(settings);
     }
 
-    // Missing fields on load -> filled from defaults via serde default attributes,
-    // then migrate schema/prompts if needed, then re-saved.
     match serde_json::from_str::<Settings>(&content) {
         Ok(mut settings) => {
-            // Decrypt DPAPI-wrapped keys (or leave legacy plaintext).
             secrets::unprotect_settings_secrets(&mut settings);
             let (settings, migrated) = migrate_settings(settings);
-            // Always re-save so defaults filled by serde are persisted; migrate may
-            // also have replaced legacy stock prompts; plaintext keys get DPAPI-wrapped.
             if migrated {
                 log::info!("settings migrated to schema v{}", settings.version);
             }
-            save_settings(&settings, path)?;
+            // Do not re-save while passphrase vault is locked (would fail without session).
+            if !secrets::vault_needs_unlock(&settings) {
+                save_settings(&settings, path)?;
+            }
             Ok(settings)
         }
         Err(e) => {
-            // Corrupt / invalid JSON: back up and recover with defaults so the app can launch.
             let backup = path.with_extension("json.corrupt");
             let _ = fs::copy(path, &backup);
             log::warn!(

@@ -11,6 +11,10 @@ interface Settings {
     show_error_notifications: boolean;
     history_retention_days: number;
   };
+  vault: {
+    mode: "dpapi" | "passphrase";
+    sealed?: { salt_b64: string; nonce_b64: string; ciphertext_b64: string } | null;
+  };
   hotkeys: {
     dictation: string;
     command_mode: string;
@@ -106,9 +110,11 @@ async function init() {
   setupPromptResetHandlers();
   setupEngineEventListeners();
   setupSetupTabHandlers();
+  setupVaultHandlers();
   
   await loadAudioDevices();
   await loadSettings();
+  await refreshVaultUi();
   await loadDictionary();
   await loadHistory();
   await loadInsights();
@@ -370,7 +376,8 @@ function gatherFormSettings(): Settings {
     },
     dictionary: {
       auto_learn: (document.getElementById("dict-auto-learn") as HTMLInputElement).checked
-    }
+    },
+    vault: currentSettings?.vault ?? savedSettings?.vault ?? { mode: "dpapi", sealed: null },
   };
 }
 
@@ -541,6 +548,89 @@ async function saveAndApplySettings(fromSetup: boolean) {
   } catch (err) {
     showToast(`Failed to save settings: ${err}`, "error");
   }
+}
+
+async function refreshVaultUi() {
+  try {
+    const st = await invoke<{
+      mode: string;
+      needs_unlock: boolean;
+      session_active: boolean;
+      has_sealed: boolean;
+    }>("vault_status");
+    const modeLabel = document.getElementById("vault-mode-label");
+    const detail = document.getElementById("vault-status-detail");
+    if (modeLabel) {
+      modeLabel.textContent =
+        st.mode === "passphrase"
+          ? "Passphrase vault (portable)"
+          : "DPAPI (this Windows user)";
+    }
+    if (detail) {
+      if (st.needs_unlock) detail.textContent = "Locked — unlock to use dictation keys.";
+      else if (st.mode === "passphrase" && st.session_active)
+        detail.textContent = "Unlocked for this session.";
+      else if (st.mode === "dpapi")
+        detail.textContent = "Keys encrypted for your Windows account.";
+      else detail.textContent = "";
+    }
+    const modal = document.getElementById("vault-unlock-modal");
+    if (modal) {
+      modal.style.display = st.needs_unlock ? "flex" : "none";
+    }
+  } catch {
+    /* optional */
+  }
+}
+
+function setupVaultHandlers() {
+  document.getElementById("vault-enable-passphrase-btn")?.addEventListener("click", async () => {
+    const pass = (document.getElementById("vault-passphrase") as HTMLInputElement)?.value || "";
+    try {
+      await invoke("vault_enable_passphrase", { passphrase: pass });
+      await loadSettings();
+      await refreshVaultUi();
+      showToast("Passphrase vault enabled. Save settings after key changes while unlocked.", "success");
+    } catch (err) {
+      showToast(`Vault error: ${err}`, "error");
+    }
+  });
+  document.getElementById("vault-enable-dpapi-btn")?.addEventListener("click", async () => {
+    try {
+      await invoke("vault_enable_dpapi");
+      await loadSettings();
+      await refreshVaultUi();
+      showToast("Switched to DPAPI (this Windows user).", "success");
+    } catch (err) {
+      showToast(`Vault error: ${err}`, "error");
+    }
+  });
+  const doUnlock = async () => {
+    const pass =
+      (document.getElementById("vault-unlock-input") as HTMLInputElement)?.value ||
+      (document.getElementById("vault-passphrase") as HTMLInputElement)?.value ||
+      "";
+    const errEl = document.getElementById("vault-unlock-error");
+    try {
+      await invoke("vault_unlock", { passphrase: pass });
+      await loadSettings();
+      await refreshVaultUi();
+      showToast("Vault unlocked.", "success");
+      if (errEl) errEl.textContent = "";
+    } catch (err) {
+      if (errEl) errEl.textContent = String(err);
+      showToast(`Unlock failed: ${err}`, "error");
+    }
+  };
+  document.getElementById("vault-unlock-btn")?.addEventListener("click", () => {
+    void doUnlock();
+  });
+  document.getElementById("vault-unlock-submit")?.addEventListener("click", () => {
+    void doUnlock();
+  });
+  document.getElementById("vault-unlock-input")?.addEventListener("keydown", (e) => {
+    if ((e as KeyboardEvent).key === "Enter") void doUnlock();
+  });
 }
 
 function setupSetupTabHandlers() {
