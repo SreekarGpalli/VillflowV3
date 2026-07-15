@@ -17,7 +17,7 @@ use std::thread;
 use tokio::sync::{broadcast, mpsc};
 use vf_core::{EngineCmd, EngineEvent, Settings, Store};
 
-pub use audio::list_input_devices;
+pub use audio::{list_input_devices, sample_mic_level};
 pub use hotkeys::{HotkeyEvent, HotkeyId, KeyCombo};
 
 /// Handle to a running engine (command channel + event subscription factory).

@@ -2,6 +2,8 @@
 
 Step-by-step checklist for the first public release.
 
+**Artifacts (PRODUCT.md):** ship **both** a portable `villflow.exe` and a Windows installer (NSIS and/or MSI via Tauri bundle). Document both on the Release page.
+
 ## 1. Create the GitHub repository
 
 1. On GitHub: **New repository** → name `VillFlow` (or your choice)
@@ -21,13 +23,7 @@ If you stay on `master`, CI still runs (both branch names are configured).
 
 ## 3. Fix the README badge
 
-In `README.md`, replace every `OWNER` with your GitHub username or org:
-
-```text
-https://github.com/YOUR_USER/VillFlow
-```
-
-Commit and push that one-line fix.
+README already points at `https://github.com/SreekarGpalli/VillflowV3`. If you rename the repo or org, update the CI badge and clone URLs in `README.md`.
 
 ## 4. Cut the v0.1.0 release
 

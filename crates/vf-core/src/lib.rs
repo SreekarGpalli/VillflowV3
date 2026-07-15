@@ -217,6 +217,10 @@ fn default_injection_method() -> InjectionMethod { InjectionMethod::ClipboardPas
 
 // --- SETTINGS SUB-STRUCTS ---
 
+fn default_history_retention_days() -> u32 {
+    0
+} // 0 = keep forever
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GeneralSettings {
     #[serde(default = "default_false")]
@@ -225,6 +229,9 @@ pub struct GeneralSettings {
     pub start_minimized: bool,
     #[serde(default = "default_true")]
     pub show_error_notifications: bool,
+    /// Delete history rows older than this many days. `0` = keep forever.
+    #[serde(default = "default_history_retention_days")]
+    pub history_retention_days: u32,
 }
 
 impl Default for GeneralSettings {
@@ -233,6 +240,7 @@ impl Default for GeneralSettings {
             launch_at_startup: false,
             start_minimized: false,
             show_error_notifications: true,
+            history_retention_days: 0,
         }
     }
 }
@@ -302,6 +310,10 @@ pub struct LlmSettings {
     pub model: String,
     #[serde(default = "default_cleanup_level")]
     pub cleanup_level: CleanupLevel,
+    /// When true, nearby field text is sent to Groq for continuity (advanced).
+    /// Default false per PRODUCT.md — reduces document rewrites.
+    #[serde(default = "default_false")]
+    pub include_field_context: bool,
 }
 
 impl Default for LlmSettings {
@@ -310,6 +322,7 @@ impl Default for LlmSettings {
             api_key: String::new(),
             model: default_llm_model(),
             cleanup_level: default_cleanup_level(),
+            include_field_context: false,
         }
     }
 }
@@ -357,18 +370,11 @@ impl Default for OutputSettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DictionarySettings {
-    #[serde(default = "default_true")]
+    /// Default off per PRODUCT.md (opt-in trust).
+    #[serde(default = "default_false")]
     pub auto_learn: bool,
-}
-
-impl Default for DictionarySettings {
-    fn default() -> Self {
-        Self {
-            auto_learn: true,
-        }
-    }
 }
 
 // --- SETTINGS ROOT STRUCT ---
@@ -436,7 +442,11 @@ pub struct HistoryEntry {
     pub mode: String,
     pub raw_transcript: String,
     pub final_text: String,
+    /// End-to-end: key-down → injection complete.
     pub duration_ms: i64,
+    /// Hold / speech window: key-down → capture stop (key-up). Used for WPM.
+    #[serde(default)]
+    pub speech_ms: i64,
     pub word_count: i64,
 }
 
@@ -464,6 +474,8 @@ pub trait Store: Send + Sync {
     fn history_list(&self, limit: u32, offset: u32) -> anyhow::Result<Vec<HistoryEntry>>;
     fn history_delete(&self, id: i64) -> anyhow::Result<()>;
     fn history_clear(&self) -> anyhow::Result<()>;
+    /// Delete history rows older than `days` (local date). No-op if days == 0.
+    fn history_purge_older_than_days(&self, days: u32) -> anyhow::Result<u64>;
 
     // Scratchpad
     fn scratchpad_get(&self) -> anyhow::Result<String>;
@@ -510,6 +522,8 @@ mod tests {
         assert_eq!(s.audio.input_device, "system_default");
         assert_eq!(s.llm.model, "openai/gpt-oss-120b");
         assert_eq!(s.llm.cleanup_level, CleanupLevel::Medium);
+        assert!(!s.llm.include_field_context);
+        assert!(!s.dictionary.auto_learn);
         assert_eq!(s.prompts.light, PROMPT_LIGHT);
         assert_eq!(s.prompts.medium, PROMPT_MEDIUM);
         assert_eq!(s.prompts.high, PROMPT_HIGH);

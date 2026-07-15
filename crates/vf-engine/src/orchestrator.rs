@@ -46,15 +46,46 @@ struct ActiveUtterance {
     stt: Arc<Mutex<Option<SttSession>>>,
     capture: Option<CaptureHandle>,
     feed_task: Option<tokio::task::JoinHandle<()>>,
+    partial_task: Option<tokio::task::JoinHandle<()>>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UtteranceMode {
     Dictation,
     /// Transform selected text.
     CommandEdit,
     /// Generate new content (no selection).
     CommandGenerate,
+}
+
+impl UtteranceMode {
+    fn overlay_label(self) -> &'static str {
+        match self {
+            Self::Dictation => "Recording",
+            Self::CommandEdit => "Edit",
+            Self::CommandGenerate => "Generate",
+        }
+    }
+}
+
+/// PRODUCT.md: refuse immediately when keys are missing — no fake Recording.
+fn check_ready(settings: &Settings, mode: UtteranceMode) -> Result<(), String> {
+    let has_el = settings
+        .stt
+        .api_keys
+        .iter()
+        .any(|k| !k.trim().is_empty());
+    if !has_el {
+        return Err("Add your API keys in Setup.".into());
+    }
+    let needs_groq = match mode {
+        UtteranceMode::Dictation => settings.llm.cleanup_level != CleanupLevel::None,
+        UtteranceMode::CommandEdit | UtteranceMode::CommandGenerate => true,
+    };
+    if needs_groq && settings.llm.api_key.trim().is_empty() {
+        return Err("Add your Groq API key in Setup.".into());
+    }
+    Ok(())
 }
 
 impl EngineRuntime {
@@ -75,6 +106,9 @@ impl EngineRuntime {
                 c.stop();
             }
             if let Some(t) = active.feed_task.take() {
+                t.abort();
+            }
+            if let Some(t) = active.partial_task.take() {
                 t.abort();
             }
         }
@@ -176,7 +210,15 @@ pub async fn run(
                     }
                     Some(HotkeyEvent::Down(HotkeyId::Dictation)) => {
                         if rt.state == EngineState::Idle {
-                            begin_utterance(&mut rt, UtteranceMode::Dictation).await;
+                            if let Err(msg) = check_ready(&rt.settings, UtteranceMode::Dictation) {
+                                inject::force_release_all_modifiers();
+                                overlay::show_toast(&rt.overlay_tx, msg);
+                                rt.emit(EngineEvent::Error(
+                                    "Add your API keys in Setup.".into(),
+                                ));
+                            } else {
+                                begin_utterance(&mut rt, UtteranceMode::Dictation).await;
+                            }
                         }
                     }
                     Some(HotkeyEvent::Up(HotkeyId::Dictation)) => {
@@ -186,24 +228,33 @@ pub async fn run(
                     }
                     Some(HotkeyEvent::Down(HotkeyId::CommandMode)) => {
                         if rt.state == EngineState::Idle {
-                            // Selection is optional: with one, the spoken command
-                            // transforms it; without, the command generates new
-                            // content inserted at the cursor.
-                            let selection = tokio::task::spawn_blocking(
-                                context::read_selection_with_fallback,
-                            )
-                            .await
-                            .ok()
-                            .flatten()
-                            .filter(|s| !s.trim().is_empty());
-                            let mode = if selection.is_some() {
-                                UtteranceMode::CommandEdit
+                            // Peek mode for readiness (Generate still needs Groq).
+                            if let Err(msg) =
+                                check_ready(&rt.settings, UtteranceMode::CommandGenerate)
+                            {
+                                inject::force_release_all_modifiers();
+                                overlay::show_toast(&rt.overlay_tx, msg);
+                                rt.emit(EngineEvent::Error(
+                                    "Add your API keys in Setup.".into(),
+                                ));
                             } else {
-                                UtteranceMode::CommandGenerate
-                            };
-                            begin_utterance(&mut rt, mode).await;
-                            if let Some(active) = rt.active.as_mut() {
-                                active.context.selection = selection;
+                                // Selection is optional: with one → Edit; without → Generate.
+                                let selection = tokio::task::spawn_blocking(
+                                    context::read_selection_with_fallback,
+                                )
+                                .await
+                                .ok()
+                                .flatten()
+                                .filter(|s| !s.trim().is_empty());
+                                let mode = if selection.is_some() {
+                                    UtteranceMode::CommandEdit
+                                } else {
+                                    UtteranceMode::CommandGenerate
+                                };
+                                begin_utterance(&mut rt, mode).await;
+                                if let Some(active) = rt.active.as_mut() {
+                                    active.context.selection = selection;
+                                }
                             }
                         }
                     }
@@ -234,12 +285,13 @@ async fn begin_utterance(rt: &mut EngineRuntime, mode: UtteranceMode) {
     let started = Instant::now();
     rt.pending_mode = Some(mode);
     rt.pending_finish = false;
+    // EngineState::Recording while utterance is in progress (includes Connecting).
     rt.set_state(EngineState::Recording);
-    overlay::show_recording(&rt.overlay_tx, 0.0);
+    overlay::show_connecting(&rt.overlay_tx);
 
-    let context = tokio::task::spawn_blocking(context::read_focus_context)
-        .await
-        .unwrap_or_default();
+    let overlay_label = mode.overlay_label().to_string();
+    let device = rt.settings.audio.input_device.clone();
+    let stt_settings = rt.settings.stt.clone();
 
     let keyterms = match rt.store.dictionary_list() {
         Ok(entries) => build_keyterms(&entries),
@@ -249,18 +301,9 @@ async fn begin_utterance(rt: &mut EngineRuntime, mode: UtteranceMode) {
         }
     };
 
-    let session = match SttSession::open(rt.settings.stt.clone(), keyterms).await {
-        Ok(s) => s,
-        Err(e) => {
-            rt.error(format!("STT open failed: {e}"));
-            return;
-        }
-    };
-
-    let stt = Arc::new(Mutex::new(Some(session)));
-
+    // PRODUCT A1: start mic immediately; open STT in parallel; buffer PCM until STT ready.
     let (audio_tx, mut audio_rx) = mpsc::unbounded_channel::<AudioChunk>();
-    let capture = match audio::start_capture(&rt.settings.audio.input_device, audio_tx) {
+    let capture = match audio::start_capture(&device, audio_tx) {
         Ok(c) => Some(c),
         Err(e) => {
             rt.error(format!("audio capture failed: {e}"));
@@ -268,19 +311,115 @@ async fn begin_utterance(rt: &mut EngineRuntime, mode: UtteranceMode) {
         }
     };
 
+    // Session slot starts empty; feed task buffers until open completes.
+    let stt: Arc<Mutex<Option<SttSession>>> = Arc::new(Mutex::new(None));
     let stt_for_feed = stt.clone();
+    let session_ready = Arc::new(tokio::sync::Notify::new());
+    let session_ready_feed = session_ready.clone();
     let overlay_tx = rt.overlay_tx.clone();
+    let label_for_feed = overlay_label.clone();
+    // Latest RMS for partial preview updates.
+    let last_rms = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let last_rms_feed = last_rms.clone();
+
     let feed_task = tokio::spawn(async move {
-        while let Some(chunk) = audio_rx.recv().await {
-            overlay::show_recording(&overlay_tx, chunk.rms);
-            let guard = stt_for_feed.lock().await;
-            if let Some(session) = guard.as_ref() {
-                if let Err(e) = session.feed_pcm(&chunk.pcm_s16le).await {
-                    log::warn!("STT feed error: {e}");
+        let mut pending: Vec<Vec<u8>> = Vec::new();
+        let mut live = false;
+
+        async fn flush_pending(
+            stt: &Arc<Mutex<Option<SttSession>>>,
+            pending: &mut Vec<Vec<u8>>,
+        ) {
+            for pcm in pending.drain(..) {
+                let guard = stt.lock().await;
+                if let Some(session) = guard.as_ref() {
+                    if let Err(e) = session.feed_pcm(&pcm).await {
+                        log::warn!("STT feed error: {e}");
+                    }
                 }
-            } else {
-                break;
             }
+        }
+
+        loop {
+            tokio::select! {
+                chunk = audio_rx.recv() => {
+                    let Some(chunk) = chunk else { break; };
+                    last_rms_feed.store(chunk.rms.to_bits(), std::sync::atomic::Ordering::Relaxed);
+                    overlay::show_active(&overlay_tx, &label_for_feed, chunk.rms);
+                    if !live {
+                        let has = stt_for_feed.lock().await.is_some();
+                        if has {
+                            flush_pending(&stt_for_feed, &mut pending).await;
+                            live = true;
+                        } else {
+                            pending.push(chunk.pcm_s16le);
+                            const MAX_PENDING_CHUNKS: usize = 500;
+                            if pending.len() > MAX_PENDING_CHUNKS {
+                                let drop_n = pending.len() - MAX_PENDING_CHUNKS;
+                                pending.drain(0..drop_n);
+                            }
+                            continue;
+                        }
+                    }
+                    let guard = stt_for_feed.lock().await;
+                    if let Some(session) = guard.as_ref() {
+                        if let Err(e) = session.feed_pcm(&chunk.pcm_s16le).await {
+                            log::warn!("STT feed error: {e}");
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                _ = session_ready_feed.notified() => {
+                    if !live && stt_for_feed.lock().await.is_some() {
+                        flush_pending(&stt_for_feed, &mut pending).await;
+                        live = true;
+                    }
+                }
+            }
+        }
+    });
+
+    // Parallel: focus context + STT open.
+    let context_fut = tokio::task::spawn_blocking(context::read_focus_context);
+    let stt_fut = SttSession::open(stt_settings, keyterms);
+
+    let (context_res, session_res) = tokio::join!(context_fut, stt_fut);
+    let context = context_res.unwrap_or_default();
+
+    let session = match session_res {
+        Ok(s) => s,
+        Err(e) => {
+            if let Some(c) = capture {
+                c.stop();
+            }
+            feed_task.abort();
+            rt.error(format!("STT open failed: {e}"));
+            return;
+        }
+    };
+
+    let mut partial_rx = session.subscribe_partials();
+    {
+        let mut guard = stt.lock().await;
+        *guard = Some(session);
+    }
+    session_ready.notify_one();
+    // Ensure overlay shows capture mode (feed task also updates on chunks).
+    overlay::show_active(&rt.overlay_tx, &overlay_label, 0.0);
+
+    // Partial STT preview on overlay (C7).
+    let overlay_partial = rt.overlay_tx.clone();
+    let label_partial = overlay_label.clone();
+    let rms_partial = last_rms.clone();
+    let partial_task = tokio::spawn(async move {
+        while let Ok(text) = partial_rx.recv().await {
+            let t = text.trim();
+            if t.is_empty() {
+                continue;
+            }
+            let level = f32::from_bits(rms_partial.load(std::sync::atomic::Ordering::Relaxed));
+            overlay::show_active_with_preview(&overlay_partial, &label_partial, level, t);
         }
     });
 
@@ -291,6 +430,7 @@ async fn begin_utterance(rt: &mut EngineRuntime, mode: UtteranceMode) {
         stt,
         capture,
         feed_task: Some(feed_task),
+        partial_task: Some(partial_task),
     });
     rt.pending_mode = None;
 
@@ -307,12 +447,17 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
     };
 
     // Stop capture first so the feed task drains and exits.
+    // Speech window ends when capture stops (key-up) — used for WPM (D6).
+    let speech_ms = active.started.elapsed().as_millis() as i64;
     if let Some(c) = active.capture.take() {
         c.stop();
     }
+    if let Some(t) = active.partial_task.take() {
+        t.abort();
+    }
     if let Some(t) = active.feed_task.take() {
-        // Give the feed task a moment to flush last chunks, then abort if needed.
-        let _ = tokio::time::timeout(std::time::Duration::from_millis(200), t).await;
+        // Brief drain so last PCM reaches STT; don't sit on the happy path long (A4).
+        let _ = tokio::time::timeout(std::time::Duration::from_millis(80), t).await;
     }
 
     rt.set_state(EngineState::Processing);
@@ -350,6 +495,7 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
 
     // For command-edit: refresh selection just before the LLM so we transform
     // what is currently selected if the user adjusted it mid-hold.
+    let mut effective_mode = mode;
     if mode == UtteranceMode::CommandEdit {
         let fresh = tokio::task::spawn_blocking(context::read_selection_with_fallback)
             .await
@@ -358,26 +504,34 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
             .filter(|s| !s.trim().is_empty());
         if let Some(sel) = fresh {
             ctx.selection = Some(sel);
-        } else if ctx
-            .selection
-            .as_ref()
-            .map(|s| s.trim().is_empty())
-            .unwrap_or(true)
-        {
-            // Nothing selected anymore — fall through as generate instead of failing.
+        } else {
+            // Lost selection → generate path (PRODUCT dual mode). Warn once (C2).
+            ctx.selection = None;
+            effective_mode = UtteranceMode::CommandGenerate;
             log::info!("command-edit lost selection; treating as generate");
+            overlay::show_toast(
+                &rt.overlay_tx,
+                "No selection — generating at cursor",
+            );
         }
     }
 
-    let final_text = match mode {
+    let t_stt_done = Instant::now();
+    let final_text = match effective_mode {
         UtteranceMode::Dictation => {
             match rt.settings.llm.cleanup_level {
                 CleanupLevel::None => raw_transcript.clone(),
                 level => {
                     let dict_words = dictionary_words_ordered(&rt.store);
+                    // PRODUCT: field context off by default; optional advanced toggle.
+                    let field_context = if rt.settings.llm.include_field_context {
+                        tail_chars(&ctx.field_context, FIELD_CONTEXT_MAX_CHARS)
+                    } else {
+                        String::new()
+                    };
                     let prompt_ctx = PromptContext {
                         app_name: ctx.app_name.clone(),
-                        field_context: tail_chars(&ctx.field_context, FIELD_CONTEXT_MAX_CHARS),
+                        field_context: field_context.clone(),
                         dictionary: dict_words,
                     };
                     match build_dictation(
@@ -402,10 +556,7 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
                                     return;
                                 }
                             };
-                            // Safeguard: dictation cleans the transcript, it never
-                            // rewrites the document. Strip any echoed field context;
-                            // if the output still looks like a document rewrite,
-                            // redo the call without context (fallback: raw words).
+                            // Light safeguards without a mandatory second Groq call (A4 / B3).
                             let stripped =
                                 strip_context_echo(&first, &prompt_ctx.field_context);
                             let suspicious = stripped.trim().is_empty()
@@ -416,37 +567,16 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
                                 );
                             if !suspicious {
                                 stripped
-                            } else {
+                            } else if !field_context.is_empty() {
+                                // Context was on and output looks like a rewrite — use raw STT.
                                 log::warn!(
-                                    "dictation output echoed field context; retrying without context"
+                                    "dictation output suspicious with field context; using raw transcript"
                                 );
-                                let bare_ctx = PromptContext {
-                                    field_context: String::new(),
-                                    ..prompt_ctx.clone()
-                                };
-                                let retried = match build_dictation(
-                                    level,
-                                    &rt.settings.prompts,
-                                    &bare_ctx,
-                                    &raw_transcript,
-                                ) {
-                                    Some(m2) => chat_completion(
-                                        &m2.system,
-                                        &m2.user,
-                                        &rt.settings.llm.model,
-                                        &rt.settings.llm.api_key,
-                                    )
-                                    .await
-                                    .unwrap_or_else(|_| raw_transcript.clone()),
-                                    None => raw_transcript.clone(),
-                                };
-                                // Still strip any residual echo; fall back to raw STT if empty.
-                                let cleaned = strip_context_echo(&retried, &prompt_ctx.field_context);
-                                if cleaned.trim().is_empty() {
-                                    raw_transcript.clone()
-                                } else {
-                                    cleaned
-                                }
+                                raw_transcript.clone()
+                            } else if stripped.trim().is_empty() {
+                                raw_transcript.clone()
+                            } else {
+                                stripped
                             }
                         }
                     }
@@ -455,17 +585,25 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
         }
         UtteranceMode::CommandEdit | UtteranceMode::CommandGenerate => {
             let dict_words = dictionary_words_ordered(&rt.store);
+            let field_context = if rt.settings.llm.include_field_context
+                || effective_mode == UtteranceMode::CommandGenerate
+            {
+                // Generate may use document context as reference (PROMPT_COMMAND_GENERATE).
+                tail_chars(&ctx.field_context, FIELD_CONTEXT_MAX_CHARS)
+            } else {
+                String::new()
+            };
             let prompt_ctx = PromptContext {
                 app_name: ctx.app_name.clone(),
-                field_context: tail_chars(&ctx.field_context, FIELD_CONTEXT_MAX_CHARS),
+                field_context,
                 dictionary: dict_words,
             };
             let selection = ctx
                 .selection
                 .clone()
                 .filter(|s| !s.trim().is_empty());
-            // Edit only when we started as edit *and* still have selection text.
-            let msgs = match (mode, &selection) {
+            // Edit only when we still have selection text after refresh.
+            let msgs = match (effective_mode, &selection) {
                 (UtteranceMode::CommandEdit, Some(sel)) => build_command(
                     &rt.settings.prompts,
                     &prompt_ctx,
@@ -495,6 +633,8 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
         }
     };
 
+    let t_llm_done = Instant::now();
+
     // Empty model output — do not wipe the target field.
     if final_text.trim().is_empty() {
         inject::force_release_all_modifiers();
@@ -503,8 +643,8 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
         return;
     }
 
-    // Command-edit: if selection is gone at inject time, warn but still insert.
-    let had_edit_selection = mode == UtteranceMode::CommandEdit
+    // Command-edit still holding a selection: re-check at inject; warn if gone (PRODUCT).
+    let had_edit_selection = effective_mode == UtteranceMode::CommandEdit
         && ctx
             .selection
             .as_ref()
@@ -517,12 +657,11 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
             .flatten()
             .filter(|s| !s.trim().is_empty());
         if still.is_none() {
+            // Non-blocking toast — do not delay inject (A4 / PRODUCT).
             overlay::show_toast(
                 &rt.overlay_tx,
                 "Selection lost — inserting at cursor",
             );
-            // Brief pause so the toast is readable; inject proceeds.
-            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
         }
     }
 
@@ -546,8 +685,8 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
             rt.emit(EngineEvent::AppInsert {
                 text: final_text.clone(),
             });
-            // Give the WebView time to apply the insert before we finish.
-            tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+            // Short settle for WebView apply (A4: keep small).
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
         Ok(Err(e)) => {
             rt.error(format!("injection failed: {e}"));
@@ -560,25 +699,20 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
     }
 
     let total_ms = started.elapsed().as_millis() as u64;
+    let stt_ms = t_stt_done.saturating_duration_since(started).as_millis();
+    let llm_ms = t_llm_done.saturating_duration_since(t_stt_done).as_millis();
+    let inject_ms = Instant::now().saturating_duration_since(t_llm_done).as_millis();
+    log::info!(
+        "utterance timings: total={total_ms}ms stt_phase={stt_ms}ms llm_phase={llm_ms}ms inject_phase={inject_ms}ms mode={effective_mode:?}"
+    );
+
     // `EngineEvent::Injected.words` is `u32` (vf-core); SQLite `HistoryEntry.word_count` is `i64`.
     let words_u32 = word_count(&final_text);
     let words_i64 = i64::from(words_u32);
 
-    let history_mode = match mode {
+    let history_mode = match effective_mode {
         UtteranceMode::Dictation => "dictation",
-        UtteranceMode::CommandEdit => {
-            // If we fell back to generate (no selection for LLM), label accordingly.
-            if ctx
-                .selection
-                .as_ref()
-                .map(|s| !s.trim().is_empty())
-                .unwrap_or(false)
-            {
-                "command"
-            } else {
-                "command_generate"
-            }
-        }
+        UtteranceMode::CommandEdit => "command",
         UtteranceMode::CommandGenerate => "command_generate",
     };
     let entry = HistoryEntry {
@@ -590,10 +724,18 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
         raw_transcript: raw_transcript.clone(),
         final_text: final_text.clone(),
         duration_ms: total_ms as i64,
+        speech_ms,
         word_count: words_i64,
     };
     if let Err(e) = rt.store.history_append(&entry) {
         log::warn!("history_append failed: {e}");
+    }
+    // History retention (E2): purge older than N days when configured.
+    let days = rt.settings.general.history_retention_days;
+    if days > 0 {
+        if let Err(e) = rt.store.history_purge_older_than_days(days) {
+            log::warn!("history_purge failed: {e}");
+        }
     }
 
     rt.emit(EngineEvent::Injected {

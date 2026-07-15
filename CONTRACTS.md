@@ -1,20 +1,26 @@
 # VillFlow — Build Contracts v1
 
-Single source of truth for every coding agent on this project. Read fully before writing code.
-Precedence: this file > your prompt file in `prompts/` > the two original human spec docs (background only).
-If a fact here contradicts live API behavior, do NOT improvise: record the discrepancy in `VERIFY-REPORT.md` and in your final summary, then stop that sub-task.
+Technical build contract for agents and implementers. Read fully before writing code.
+
+**Product behavior precedence:** `docs/PRODUCT.md` (owner-locked decisions) **>** this file **>** agent prompts in `prompts/` **>** original human specs under `docs/internal/` (background only).  
+If this file conflicts with `docs/PRODUCT.md`, follow PRODUCT.md and update this file when you touch the area.  
+If a fact here contradicts live API behavior, do NOT improvise: record the discrepancy in `docs/internal/VERIFY-REPORT.md` and in your final summary, then stop that sub-task.
+
+Fix tracker: `docs/ISSUES-AND-FIX-PLAN.md`.
 
 ---
 
 ## 1. Product
 
-Windows 11 push-to-talk voice dictation, tray-resident, WisprFlow-style. Hold **Ctrl+Shift+Z** in any app → speak → on release, polished text is pasted at the cursor of the focused field. Hold **Ctrl+Shift+X** (Command Mode) → speak an instruction ("make this more formal") → the selected text is transformed and replaced. **Ctrl+Shift+C** toggles a floating Scratchpad. English only; speakers have Indian accents. Everything local except two cloud calls: ElevenLabs realtime STT and Groq LLM.
+Windows 11 push-to-talk voice dictation, tray-resident, open source / free / no accounts. Hold **Ctrl+Shift+Z** in any app → speak → on release, polished text is pasted at the cursor of the focused field. Hold **Ctrl+Shift+X** (Command Mode) → dual mode: **with selection** transform/replace; **without selection** generate new text at the cursor. Overlay labels **Edit** vs **Generate**. **Ctrl+Shift+C** toggles a floating Scratchpad. English only; speakers have Indian accents. Everything local except two cloud calls: ElevenLabs realtime STT and Groq LLM.
 
-Latency budget after key release: STT commit ≤ ~300ms, LLM ≤ ~300ms, injection ≤ ~100ms → **< 700ms total**. Cleanup level "none" skips the LLM entirely.
+**Latency:** best effort only — **no hard millisecond SLA**. Remove artificial delays in code; typical cloud path may be ~0.5–2s depending on network. Cleanup level `none` skips the LLM entirely (fastest).
+
+**Distribution:** GitHub Releases ship **portable `villflow.exe` and a Windows installer** (Tauri bundle). Production UI requires Tauri build (embedded frontend), not plain `cargo build` alone.
 
 ## 2. Non-goals — DO NOT BUILD
 
-Whisper mode; "backtrack" voice command; Transforms/rewrite presets; undo-AI-edit; snippet library; Styles/tone presets or any style settings; mouse-button trigger; microphone auto-ranking; session recovery; 20-minute-session handling; UI localization; multi-language STT; account system; telemetry; auto-update/installer (release artifact = portable exe); streaming text into the target field (always paste the final text once); "communication profile" insights.
+Whisper mode; "backtrack" voice command; Transforms/rewrite presets; undo-AI-edit; snippet library; Styles/tone presets or any style settings; mouse-button trigger; microphone auto-ranking; session recovery; 20-minute-session handling; UI localization; multi-language STT; account system; telemetry; auto-update (manual GitHub releases are fine); streaming text into the target field (always paste the final text once); "communication profile" insights.
 
 ## 3. Locked stack
 
@@ -46,13 +52,18 @@ prompts/                agent briefs — read only your own file.
 Single process (Tauri). Startup: load settings → spawn engine thread (owns a tokio runtime) → `EngineHandle` exposes a command channel in and a broadcast of `EngineEvent` out. Engine states: `Idle → Recording → Processing → Injecting → Idle`, plus transient `Error(String)`.
 
 **Dictation flow (push-to-talk only — no toggle mode):**
-1. Hotkey down (full combo matched): swallow the keystrokes (the target app must never receive Ctrl+Shift+Z). Read context best-effort: focused element's text near the caret via UI Automation (cap ~1500 chars), plus window title and process exe name. Open the ElevenLabs WebSocket with the current API key. Start capture: if `audio.input_device == "system_default"`, resolve the CURRENT Windows default input device at each utterance start (this satisfies the clamshell/unplug requirement); else use the named device. Resample to 16 kHz mono s16le, stream chunks.
-2. Overlay shows "Recording" + minimal level pulse.
-3. Hotkey up: stop capture, send final audio with commit. Overlay shows "Processing".
-4. On committed transcript: `cleanup_level == none` → inject raw text. Otherwise call Groq with the built prompt (§8–§9) → inject the response.
-5. Inject per §Output settings. Overlay hides. Append a history row (word_count = words in final text; duration_ms = key-down→injection). Start the auto-learn watcher (§15).
+1. Hotkey down (full combo matched): swallow the keystrokes (the target app must never receive Ctrl+Shift+Z). If not ready (no ElevenLabs keys, or cleanup≠none and no Groq key): **refuse immediately** with a clear overlay/toast (e.g. “Add your API keys in Setup”) — do **not** enter Recording or open STT.
+2. Otherwise: start **microphone capture immediately** (ring-buffer). In parallel, open ElevenLabs WebSocket. If `audio.input_device == "system_default"`, resolve the CURRENT Windows default input device at each utterance start; else use the named device. Resample to 16 kHz mono s16le. Flush buffered PCM when the session is ready, then stream live. Read context best-effort (window title, process name; field text only if advanced “include field context” is on — see PRODUCT.md).
+3. Overlay: **Connecting…** while waiting for capture/STT as needed; then **Recording** + minimal level pulse **only when mic is capturing**.
+4. Hotkey up: stop capture, send final audio with commit. Overlay shows **Processing**.
+5. On committed transcript: `cleanup_level == none` → inject raw text. Otherwise call Groq with the built prompt (§8–§9) → inject the response. Default: **do not** send document field context unless advanced toggle is on.
+6. Inject per §Output settings. Overlay hides. Append a history row (word_count = words in final text; duration_ms = key-down→injection). Start the auto-learn watcher (§15) only if `dictionary.auto_learn` is true.
 
-**Command Mode flow:** requires a text selection in the focused app. Read selection via UIA; fallback: simulated Ctrl+C with full clipboard save/restore. No selection → overlay toast "Select text first", abort to Idle. Else record the spoken instruction through the same STT path, then Groq with the command prompt (§9), then inject the result over the selection. History row with `mode='command'`.
+**Command Mode flow (dual mode — PRODUCT.md):**
+1. Read selection via UIA; fallback: simulated Ctrl+C with full clipboard save/restore.
+2. **With selection** → mode Edit: record spoken instruction, Groq with command prompt (§9), inject over selection. History `mode='command'`. Overlay **Edit** while active.
+3. **Without selection** → mode Generate: record spoken instruction, Groq with command-generate prompt, insert at cursor. History `mode='command_generate'`. Overlay **Generate**.
+4. If Edit started with a selection but selection is gone at inject time: **still insert at cursor** + short warning toast (do not abort).
 
 **Scratchpad hotkey:** engine emits `EngineEvent::ToggleScratchpad`; the app shell shows/hides the Scratchpad window.
 
@@ -154,12 +165,14 @@ You apply a spoken editing instruction to a piece of text. Output ONLY the trans
     "restore_clipboard": true
   },
   "dictionary": {
-    "auto_learn": true
+    "auto_learn": false
   }
 }
 ```
 
 Missing fields on load → filled from defaults (serde `#[serde(default)]`), then re-saved. `injection_method` ∈ `clipboard_paste | sendinput_typing`. `cleanup_level` ∈ `none | light | medium | high`. API keys live only in this local file — never log them.
+
+**Defaults (PRODUCT.md):** `dictionary.auto_learn` = **false**; default cleanup = **medium**. Advanced setting (implementation may add): include field context for dictation continuity — **off** by default.
 
 ## 11. SQLite schema — `%APPDATA%\VillFlow\villflow.db`
 
@@ -177,7 +190,7 @@ CREATE TABLE IF NOT EXISTS history (
   ts TEXT NOT NULL,                           -- ISO 8601 local
   app_name TEXT NOT NULL,                     -- process exe name
   window_title TEXT NOT NULL DEFAULT '',
-  mode TEXT NOT NULL DEFAULT 'dictation',     -- 'dictation' | 'command'
+  mode TEXT NOT NULL DEFAULT 'dictation',     -- 'dictation' | 'command' | 'command_generate'
   raw_transcript TEXT NOT NULL,
   final_text TEXT NOT NULL,
   duration_ms INTEGER NOT NULL DEFAULT 0,
@@ -228,31 +241,36 @@ Engine entry point (implemented in vf-engine): `vf_engine::spawn(settings: Setti
 
 ## 13. Tauri IPC commands (app/src-tauri — thin wrappers only)
 
-`get_settings`, `save_settings(settings)` (persist via vf-store, then `EngineCmd::ApplySettings`), `list_groq_models()` (vf-cloud), `list_input_devices()` (cpal names + "System default" pseudo-entry), `dictionary_list/add/update/delete/toggle_star`, `history_list(limit, offset)`, `insights_summary()`, `scratchpad_get`, `scratchpad_set(content)`, `reset_prompt(name)` → returns the vf-core default text, `set_autostart(enabled)` + `autostart_status()` (HKCU `Software\Microsoft\Windows\CurrentVersion\Run`, value `VillFlow` = exe path, via `winreg`).
+`get_settings`, `save_settings(settings)` (persist via vf-store, then `EngineCmd::ApplySettings`), `list_groq_models()` (vf-cloud), `list_input_devices()` (cpal names + "System default" pseudo-entry), `dictionary_list/add/update/delete/toggle_star`, `history_list(limit, offset)`, `history_delete` / `history_clear` (allowed — PRODUCT.md), `insights_summary()`, `scratchpad_get`, `scratchpad_set(content)`, `reset_prompt(name)` → returns the vf-core default text, `set_autostart(enabled)` + `autostart_status()` (HKCU `Software\Microsoft\Windows\CurrentVersion\Run`, value `VillFlow` = exe path, via `winreg`).
 
-Shell → frontend events: `engine-state`, `engine-error`, `scratchpad-toggle`.
+Shell → frontend events: `engine-state`, `engine-error`, `scratchpad-toggle` (or shell handles scratchpad toggle directly).
 
 ## 14. UI windows (app/ui)
 
-**Main window "VillFlow"** (opened from tray; hidden on launch when `start_minimized`): left nav →
-- General: launch at startup, start minimized, show error notifications.
-- Dictation: microphone picker (default entry "System default"), Auto Cleanup level (none/light/medium/high).
+**Main window "VillFlow"** — default tab **Setup** (PRODUCT.md happy path). On first run / until Ready: **always show** main window (ignore `start_minimized` until Ready after a successful save). Left nav →
+- **Setup (default):** Ready checklist; How to use (live hotkey strings); ElevenLabs + Groq keys essentials; mic; hotkeys summary; cleanup level; **Save & apply** button.
+- Dictation: microphone, Auto Cleanup (none/light/medium/high); advanced: include field context toggle (**off** by default).
 - Hotkeys: three shortcut-capture fields (dictation, command mode, scratchpad).
-- Dictionary: table (word, starred ★, source, use_count) with add/edit/delete/star; auto-learn toggle.
-- AI Services: ElevenLabs — ordered API key list (add/remove/reorder; masked display), endpoint host select; Groq — API key, model picker (live from `list_groq_models`, refresh button, default preselected).
-- Prompts: four editors (light/medium/high/command) each with "Reset to default".
+- Dictionary: table (word, starred ★, source, use_count) with add/edit/delete/star; auto-learn toggle (**default off**).
+- AI Services / Cloud Keys: full ElevenLabs key list (add/remove/reorder; masked), endpoint; Groq key, model picker (`list_groq_models`, refresh).
+- Prompts: editors for light/medium/high/command/command_generate each with "Reset to default".
 - Output: injection method radio (Clipboard paste / Simulated typing), restore-clipboard toggle.
-- History: recent transcripts (time, app, final text; expandable raw transcript) with per-row Copy button.
-- Insights: total words, average WPM, top 5 apps, GitHub-style streak heatmap of daily words.
-- About: VillFlow, version, "V3", links to the ElevenLabs and Groq docs.
+- History: recent transcripts with Copy, **per-row delete**, and **Clear all**.
+- Insights: total words, average WPM, top 5 apps, streak heatmap.
+- General: launch at startup, start minimized (honored only after Ready), show error notifications.
+- About: VillFlow, version, "V3", links to ElevenLabs and Groq docs.
+
+**Ready checklist:** ≥1 ElevenLabs key; Groq key **or** cleanup `none`; mic OK; three valid distinct hotkeys each with a modifier.
+
+**Not ready + hotkey:** engine refuses immediately with clear message (see §5).
 
 **Scratchpad window:** floating, always-on-top, single tab, `contenteditable` with a minimal toolbar (bold, italic, bullet list). Autosaves (debounced ~500ms) via `scratchpad_set`. Ctrl+Shift+C toggles visibility; closing hides it.
 
-**Tray:** V3 icon; tooltip reflects engine state; menu = Open VillFlow / Scratchpad / Quit. Closing the main window hides to tray (app keeps running).
+**Tray:** V3 icon; tooltip reflects engine state / Needs setup; menu = Open VillFlow / Scratchpad / Quit. Closing the main window hides to tray (app keeps running).
 
 ## 15. Dictionary auto-learn (vf-engine, best-effort)
 
-After injection (when `dictionary.auto_learn`): remember the injected text and UIA element; after ~8s re-read the element's text. Word-align injected vs. current; single-token replacements with edit distance 1–3, token length ≥ 4, not a common stopword → `dictionary.add(word, source='auto')`, max 3 per utterance. Silent no-op if the element can't be re-read. Also `bump_use_count` for dictionary words that appeared in the final text.
+Default **`dictionary.auto_learn` = false** (PRODUCT.md). When enabled: after injection, remember the injected text and UIA element; after ~8s re-read the element's text. Word-align injected vs. current; single-token replacements with edit distance 1–3, token length ≥ 4, not a common stopword → `dictionary.add(word, source='auto')`, max 3 per utterance. Silent no-op if the element can't be re-read. Also `bump_use_count` for dictionary words that appeared in the final text.
 
 ## 16. Process rules (all agents)
 
@@ -260,8 +278,9 @@ After injection (when `dictionary.auto_learn`): remember the injected text and U
 2. Before ending a session: `cargo build --workspace` must pass (and `cargo clippy --workspace` should be clean; justify any remaining warnings in your summary). Commit everything: `git add -A && git commit -m "<agent>: <phase>: <summary>"`.
 3. No dummy/placeholder implementations without a `// TODO(vf): <reason>` comment plus a line in your final summary.
 4. Never add: telemetry, accounts, network calls beyond §6/§7, features listed in §2.
-5. Do not modify `CONTRACTS.md`, `prompts/`, or the two original spec `.md` files.
+5. Do not modify `prompts/` or the two original human spec docs under `docs/internal/` unless the product owner asks. **CONTRACTS.md** and **docs/PRODUCT.md** may be updated when locking product decisions or aligning technical contracts. Prefer updating PRODUCT.md for behavior; keep this file in sync.
 6. Never print or log API keys.
+7. Sole maintainers may ignore multi-agent crate ownership walls when fixing cross-cutting bugs (e.g. mic + STT + UI).
 
 ## 17. Build order
 
@@ -279,6 +298,16 @@ After injection (when `dictionary.auto_learn`): remember the injected text and U
 | P5 | Antigravity — session 3 | integration: engine host, tray, autostart, notifications |
 | V5 | opencode | verify P5 + release build |
 
-## 18. Orchestrator-decided defaults (not from the human spec — flag if you disagree, don't silently change)
+## 18. Locked product defaults (see docs/PRODUCT.md — do not silently reverse)
 
-Command Mode requires an existing selection (no-selection → toast + abort). Cleanup `none` bypasses the LLM. `temperature 0.2` / `max_completion_tokens 2048`. Auto-learn toggle default ON, cap 3 words/utterance. Overlay bottom-center. Scratchpad always-on-top. History has no delete action (spec asks only list + copy). Keyterm selection rule (starred first, then use_count). Portable exe, no installer. "Communication profile" insight dropped (accepted limitation).
+- Command Mode: **dual** (Edit with selection / Generate without); selection lost at inject → insert at cursor + warning.
+- Cleanup `none` bypasses the LLM. Default cleanup **medium**. `temperature 0.2` / `max_completion_tokens 2048`.
+- Field context to LLM: **off by default**; advanced toggle only.
+- Auto-learn default **OFF**, cap 3 words/utterance when on.
+- Overlay bottom-center; labels Connecting / Recording / Processing / Edit / Generate as applicable.
+- Scratchpad always-on-top.
+- History: list + copy + **delete row** + **clear all**.
+- Keyterms: starred first, then use_count.
+- Release: **portable exe + installer**.
+- Setup-first UI; Save & apply on Setup; show window until Ready.
+- "Communication profile" insight dropped (accepted limitation).

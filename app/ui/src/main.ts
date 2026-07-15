@@ -9,6 +9,7 @@ interface Settings {
     launch_at_startup: boolean;
     start_minimized: boolean;
     show_error_notifications: boolean;
+    history_retention_days: number;
   };
   hotkeys: {
     dictation: string;
@@ -28,6 +29,7 @@ interface Settings {
     api_key: string;
     model: string;
     cleanup_level: string;
+    include_field_context: boolean;
   };
   prompts: {
     light: string;
@@ -76,10 +78,13 @@ interface InsightsSummary {
 
 let savedSettings: Settings | null = null;
 let currentSettings: Settings | null = null;
-let activeTab = "general";
+let activeTab = "setup";
 let editingWordId: number | null = null;
 let historyOffset = 0;
 const historyLimit = 15;
+let lastEngineError = "(none)";
+let lastEngineState = "Idle";
+let lastDictationSummary = "(none yet)";
 
 // --- DOM ELEMENTS CACHE ---
 
@@ -100,12 +105,14 @@ async function init() {
   setupGroqHandlers();
   setupPromptResetHandlers();
   setupEngineEventListeners();
+  setupSetupTabHandlers();
   
   await loadAudioDevices();
   await loadSettings();
   await loadDictionary();
   await loadHistory();
   await loadInsights();
+  updateReadyChecklist();
 
   // Wire up Load More button click
   const loadMoreBtn = document.getElementById("history-load-more-btn");
@@ -126,32 +133,64 @@ async function init() {
       showToast(`Failed to clear history: ${err}`, "error");
     }
   });
+
+  document.getElementById("history-export-btn")?.addEventListener("click", async () => {
+    try {
+      const json = await invoke<string>("history_export");
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `villflow-history-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast("History exported.", "success");
+    } catch (err) {
+      showToast(`Export failed: ${err}`, "error");
+    }
+  });
 }
 
 // --- TAB ROUTING ---
 
 function setupTabs() {
-  tabItems.forEach(item => {
-    item.addEventListener("click", async () => {
-      const tab = item.getAttribute("data-tab");
-      if (!tab) return;
-      
-      tabItems.forEach(i => i.classList.remove("active"));
-      tabContents.forEach(c => c.classList.remove("active"));
-      
-      item.classList.add("active");
-      const targetContent = document.getElementById(`tab-${tab}`);
-      if (targetContent) targetContent.classList.add("active");
-      
-      activeTab = tab;
-      
-      // Load specific tab data on switch
-      if (tab === "dictionary") {
-        await loadDictionary();
-      } else if (tab === "history") {
-        await loadHistory();
-      } else if (tab === "insights") {
-        await loadInsights();
+  const activateTab = async (item: Element) => {
+    const tab = item.getAttribute("data-tab");
+    if (!tab) return;
+
+    tabItems.forEach((i) => {
+      i.classList.remove("active");
+      i.setAttribute("aria-selected", "false");
+      (i as HTMLElement).tabIndex = -1;
+    });
+    tabContents.forEach((c) => c.classList.remove("active"));
+
+    item.classList.add("active");
+    item.setAttribute("aria-selected", "true");
+    (item as HTMLElement).tabIndex = 0;
+    const targetContent = document.getElementById(`tab-${tab}`);
+    if (targetContent) targetContent.classList.add("active");
+
+    activeTab = tab;
+
+    if (tab === "dictionary") {
+      await loadDictionary();
+    } else if (tab === "history") {
+      await loadHistory();
+    } else if (tab === "insights") {
+      await loadInsights();
+    }
+  };
+
+  tabItems.forEach((item) => {
+    item.addEventListener("click", () => {
+      void activateTab(item);
+    });
+    item.addEventListener("keydown", (e) => {
+      const ke = e as KeyboardEvent;
+      if (ke.key === "Enter" || ke.key === " ") {
+        ke.preventDefault();
+        void activateTab(item);
       }
     });
   });
@@ -190,6 +229,11 @@ function populateForm(settings: Settings) {
   (document.getElementById("gen-launch-at-startup") as HTMLInputElement).checked = settings.general.launch_at_startup;
   (document.getElementById("gen-start-minimized") as HTMLInputElement).checked = settings.general.start_minimized;
   (document.getElementById("gen-show-notifications") as HTMLInputElement).checked = settings.general.show_error_notifications;
+  const retention = document.getElementById("gen-history-retention") as HTMLSelectElement | null;
+  if (retention) {
+    const d = settings.general.history_retention_days ?? 0;
+    retention.value = String([0, 30, 90, 365].includes(d) ? d : 0);
+  }
 
   // Dictation Tab
   const deviceSelect = document.getElementById("dict-audio-device") as HTMLSelectElement;
@@ -212,10 +256,17 @@ function populateForm(settings: Settings) {
   // Dictionary Tab
   (document.getElementById("dict-auto-learn") as HTMLInputElement).checked = settings.dictionary.auto_learn;
 
-  // AI Services Tab
+  // Field context (advanced)
+  const ctxToggle = document.getElementById("llm-include-field-context") as HTMLInputElement | null;
+  if (ctxToggle) ctxToggle.checked = !!settings.llm.include_field_context;
+
+  // API keys (Setup)
   renderElevenLabsKeysList(settings.stt.api_keys);
   (document.getElementById("el-endpoint") as HTMLSelectElement).value = settings.stt.endpoint;
   (document.getElementById("groq-key") as HTMLInputElement).value = settings.llm.api_key;
+
+  updateHotkeySummaries(settings);
+  updateReadyChecklist();
   
   // Set selected model
   const modelSelect = document.getElementById("groq-model") as HTMLSelectElement;
@@ -278,7 +329,11 @@ function gatherFormSettings(): Settings {
     general: {
       launch_at_startup: (document.getElementById("gen-launch-at-startup") as HTMLInputElement).checked,
       start_minimized: (document.getElementById("gen-start-minimized") as HTMLInputElement).checked,
-      show_error_notifications: (document.getElementById("gen-show-notifications") as HTMLInputElement).checked
+      show_error_notifications: (document.getElementById("gen-show-notifications") as HTMLInputElement).checked,
+      history_retention_days: parseInt(
+        (document.getElementById("gen-history-retention") as HTMLSelectElement | null)?.value || "0",
+        10,
+      ) || 0,
     },
     hotkeys: {
       dictation: (document.getElementById("hk-dictation") as HTMLInputElement).value,
@@ -297,7 +352,10 @@ function gatherFormSettings(): Settings {
     llm: {
       api_key: (document.getElementById("groq-key") as HTMLInputElement).value,
       model: modelSelect.value,
-      cleanup_level
+      cleanup_level,
+      include_field_context:
+        (document.getElementById("llm-include-field-context") as HTMLInputElement | null)
+          ?.checked ?? false,
     },
     prompts: {
       light: (document.getElementById("prompt-light-text") as HTMLTextAreaElement).value,
@@ -331,25 +389,8 @@ function setupSettingsChangeListeners() {
 
   saveConfirmBtn?.addEventListener("click", async () => {
     if (!currentSettings || !savedSettings) return;
-    try {
-      // Persist settings first; then sync registry (refresh path when enabled).
-      await invoke("save_settings", { settings: currentSettings });
-      try {
-        await invoke("set_autostart", {
-          enabled: currentSettings.general.launch_at_startup,
-        });
-      } catch (autoErr) {
-        showToast(`Settings saved, but autostart registry failed: ${autoErr}`, "error");
-        savedSettings = JSON.parse(JSON.stringify(currentSettings));
-        updateSaveBar();
-        return;
-      }
-      savedSettings = JSON.parse(JSON.stringify(currentSettings));
-      updateSaveBar();
-      showToast("Settings saved successfully.", "success");
-    } catch (err) {
-      showToast(`Failed to save settings: ${err}`, "error");
-    }
+    currentSettings = gatherFormSettings();
+    await saveAndApplySettings(false);
   });
 
   saveDiscardBtn?.addEventListener("click", () => {
@@ -368,6 +409,197 @@ function updateSaveBar() {
   } else {
     saveBar.classList.remove("active");
   }
+  updateReadyChecklist();
+  if (currentSettings) updateHotkeySummaries(currentSettings);
+}
+
+function updateHotkeySummaries(settings: Settings) {
+  const set = (id: string, val: string) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val;
+  };
+  set("howto-dictation", settings.hotkeys.dictation);
+  set("howto-command", settings.hotkeys.command_mode);
+  set("howto-scratchpad", settings.hotkeys.scratchpad);
+  set("setup-hk-dictation", settings.hotkeys.dictation);
+  set("setup-hk-command", settings.hotkeys.command_mode);
+  set("setup-hk-scratchpad", settings.hotkeys.scratchpad);
+}
+
+/** PRODUCT Ready checklist — mirrors engine gate logic for UX. */
+function computeReady(settings: Settings | null): {
+  ready: boolean;
+  el: boolean;
+  groq: boolean;
+  mic: boolean;
+  hotkeys: boolean;
+  detail: string;
+} {
+  if (!settings) {
+    return {
+      ready: false,
+      el: false,
+      groq: false,
+      mic: false,
+      hotkeys: false,
+      detail: "Loading settings…",
+    };
+  }
+  const el = settings.stt.api_keys.some((k) => k.trim().length > 0);
+  const groq =
+    settings.llm.cleanup_level === "none" || settings.llm.api_key.trim().length > 0;
+  const mic = true; // system_default always acceptable; capture fails later if no device
+  const parts = [
+    settings.hotkeys.dictation,
+    settings.hotkeys.command_mode,
+    settings.hotkeys.scratchpad,
+  ];
+  const hasModifier = (s: string) =>
+    /ctrl|shift|alt|win|meta|super/i.test(s) && s.includes("+");
+  const hotkeys =
+    parts.every((p) => p.trim().length > 0 && hasModifier(p)) &&
+    new Set(parts.map((p) => p.toLowerCase())).size === 3;
+
+  let detail = "Ready to dictate — open Notepad and hold your dictation hotkey.";
+  if (!el) detail = "Add at least one ElevenLabs API key, then Save & apply.";
+  else if (!groq)
+    detail = "Add a Groq API key, or set cleanup to None, then Save & apply.";
+  else if (!hotkeys)
+    detail = "Set three different hotkeys, each with a modifier (Ctrl/Shift/Alt/Win).";
+
+  return {
+    ready: el && groq && mic && hotkeys,
+    el,
+    groq,
+    mic,
+    hotkeys,
+    detail,
+  };
+}
+
+function updateReadyChecklist() {
+  const r = computeReady(currentSettings ?? savedSettings);
+  const banner = document.getElementById("setup-ready-banner");
+  const title = document.getElementById("setup-ready-title");
+  const detail = document.getElementById("setup-ready-detail");
+  if (title) title.textContent = r.ready ? "Ready to dictate" : "Needs setup";
+  if (detail) detail.textContent = r.detail;
+  if (banner) {
+    banner.style.background = r.ready
+      ? "rgba(129,201,149,0.12)"
+      : "rgba(242,139,130,0.12)";
+    banner.style.borderColor = r.ready
+      ? "rgba(129,201,149,0.25)"
+      : "rgba(242,139,130,0.25)";
+  }
+  const mark = (id: string, ok: boolean, label: string) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = `${ok ? "✓" : "○"} ${label}`;
+  };
+  mark("setup-check-el", r.el, "ElevenLabs API key");
+  mark("setup-check-groq", r.groq, "Groq API key (or cleanup None)");
+  mark("setup-check-mic", r.mic, "Microphone");
+  mark("setup-check-hotkeys", r.hotkeys, "Hotkeys valid");
+
+  const eng = document.getElementById("setup-engine-state");
+  if (eng) eng.textContent = lastEngineState;
+  const err = document.getElementById("setup-last-error");
+  if (err) err.textContent = lastEngineError;
+  const lastDict = document.getElementById("setup-last-dictation");
+  if (lastDict) lastDict.textContent = lastDictationSummary;
+
+  // Sidebar status when not ready
+  const badge = document.getElementById("engine-status-badge");
+  if (badge && lastEngineState === "Idle" && !r.ready) {
+    const text = badge.querySelector(".status-text");
+    if (text) text.textContent = "Needs setup";
+  }
+}
+
+async function saveAndApplySettings(fromSetup: boolean) {
+  if (!currentSettings) currentSettings = gatherFormSettings();
+  else currentSettings = gatherFormSettings();
+  if (!currentSettings) return;
+  try {
+    await invoke("save_settings", { settings: currentSettings });
+    try {
+      await invoke("set_autostart", {
+        enabled: currentSettings.general.launch_at_startup,
+      });
+    } catch (autoErr) {
+      showToast(`Settings saved, but autostart registry failed: ${autoErr}`, "error");
+      savedSettings = JSON.parse(JSON.stringify(currentSettings));
+      updateSaveBar();
+      return;
+    }
+    savedSettings = JSON.parse(JSON.stringify(currentSettings));
+    updateSaveBar();
+    showToast(
+      fromSetup ? "Saved & applied. You can dictate now if Ready is green." : "Settings saved successfully.",
+      "success",
+    );
+  } catch (err) {
+    showToast(`Failed to save settings: ${err}`, "error");
+  }
+}
+
+function setupSetupTabHandlers() {
+  document.getElementById("setup-save-apply-btn")?.addEventListener("click", () => {
+    currentSettings = gatherFormSettings();
+    void saveAndApplySettings(true);
+  });
+  document.getElementById("setup-goto-hotkeys")?.addEventListener("click", () => {
+    const item = document.querySelector('.nav-item[data-tab="hotkeys"]') as HTMLElement | null;
+    item?.click();
+  });
+
+  document.getElementById("groq-key-toggle")?.addEventListener("click", () => {
+    const input = document.getElementById("groq-key") as HTMLInputElement | null;
+    const btn = document.getElementById("groq-key-toggle");
+    if (!input || !btn) return;
+    if (input.type === "password") {
+      input.type = "text";
+      btn.textContent = "Hide";
+    } else {
+      input.type = "password";
+      btn.textContent = "Show";
+    }
+  });
+
+  document.getElementById("setup-test-mic-btn")?.addEventListener("click", async () => {
+    const btn = document.getElementById("setup-test-mic-btn") as HTMLButtonElement | null;
+    const fill = document.getElementById("setup-mic-meter-fill");
+    const label = document.getElementById("setup-mic-meter-label");
+    const deviceSelect = document.getElementById("dict-audio-device") as HTMLSelectElement | null;
+    let device = deviceSelect?.value || "system_default";
+    if (device === "System default") device = "system_default";
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "Listening…";
+    }
+    if (label) label.textContent = "Speak now…";
+    try {
+      const level = await invoke<number>("sample_mic_level", { device });
+      const pct = Math.round(Math.min(1, Math.max(0, level)) * 100);
+      if (fill) (fill as HTMLElement).style.width = `${pct}%`;
+      if (label) {
+        label.textContent =
+          pct < 5
+            ? "Very quiet — check the mic or speak louder."
+            : pct < 25
+              ? `Level OK (${pct}%).`
+              : `Strong signal (${pct}%).`;
+      }
+    } catch (err) {
+      showToast(`Mic test failed: ${err}`, "error");
+      if (label) label.textContent = "Mic test failed.";
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "Test microphone";
+      }
+    }
+  });
 }
 
 // --- AUDIO HARDWARE ENUMERATION ---
@@ -489,6 +721,22 @@ const wordModalSave = document.getElementById("word-modal-save");
 const wordModalCancel = document.getElementById("word-modal-cancel");
 
 function setupDictionaryHandlers() {
+  document.getElementById("dict-export-btn")?.addEventListener("click", async () => {
+    try {
+      const json = await invoke<string>("dictionary_export");
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `villflow-dictionary-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast("Dictionary exported.", "success");
+    } catch (err) {
+      showToast(`Export failed: ${err}`, "error");
+    }
+  });
+
   addWordBtn?.addEventListener("click", () => {
     editingWordId = null;
     if (wordModalTitle) wordModalTitle.innerText = "Add Custom Word";
@@ -1104,9 +1352,15 @@ async function setupEngineEventListeners() {
     try {
       await listen<string>("engine-state", (event) => {
         const state = event.payload;
+        lastEngineState = state;
         // Reset state classes
         statusBadge.className = "engine-status";
-        statusText.textContent = state;
+        const r = computeReady(currentSettings ?? savedSettings);
+        if (state === "Idle" && !r.ready) {
+          statusText.textContent = "Needs setup";
+        } else {
+          statusText.textContent = state;
+        }
 
         if (state === "Recording") {
           statusBadge.classList.add("recording");
@@ -1115,11 +1369,21 @@ async function setupEngineEventListeners() {
         } else if (state === "Injecting") {
           statusBadge.classList.add("injecting");
         }
+        updateReadyChecklist();
       });
 
       await listen<string>("engine-error", (event) => {
         const errMsg = event.payload;
+        lastEngineError = errMsg || "(none)";
+        updateReadyChecklist();
         showToast(`Engine Error: ${errMsg}`, "error");
+      });
+
+      await listen<{ words: number; total_ms: number }>("engine-injected", (event) => {
+        const w = event.payload?.words ?? 0;
+        const ms = event.payload?.total_ms ?? 0;
+        lastDictationSummary = `${w} word${w === 1 ? "" : "s"} in ${ms} ms`;
+        updateReadyChecklist();
       });
 
       // Dictation into Settings fields only when *this* window is focused.

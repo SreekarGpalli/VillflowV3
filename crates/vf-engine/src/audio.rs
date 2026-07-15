@@ -81,6 +81,31 @@ impl Drop for CaptureHandle {
     }
 }
 
+/// Sample peak RMS (0.0..1.0) from the device for ~`duration_ms` (Setup mic test).
+pub fn sample_mic_level(input_device: &str, duration_ms: u64) -> anyhow::Result<f32> {
+    let (tx, mut rx) = mpsc::unbounded_channel::<AudioChunk>();
+    let handle = start_capture(input_device, tx)?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(duration_ms.max(100));
+    let mut peak = 0.0f32;
+    // Blocking wait on a temp runtime / poll channel via try_recv in a loop.
+    while std::time::Instant::now() < deadline {
+        while let Ok(chunk) = rx.try_recv() {
+            if chunk.rms > peak {
+                peak = chunk.rms;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(15));
+    }
+    // Drain remaining
+    while let Ok(chunk) = rx.try_recv() {
+        if chunk.rms > peak {
+            peak = chunk.rms;
+        }
+    }
+    handle.stop();
+    Ok(peak.clamp(0.0, 1.0))
+}
+
 /// Start capturing from the configured device. Chunks are sent on `tx` until stopped.
 pub fn start_capture(
     input_device: &str,

@@ -196,6 +196,28 @@ fn list_input_devices() -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
+fn sample_mic_level(device: String) -> Result<f32, String> {
+    let dev = if device.trim().is_empty() {
+        "system_default".to_string()
+    } else {
+        device
+    };
+    vf_engine::sample_mic_level(&dev, 450).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn history_export(store: State<'_, Arc<SqliteStore>>) -> Result<String, String> {
+    let rows = store.history_list(10_000, 0).map_err(|e| e.to_string())?;
+    serde_json::to_string_pretty(&rows).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn dictionary_export(store: State<'_, Arc<SqliteStore>>) -> Result<String, String> {
+    let rows = store.dictionary_list().map_err(|e| e.to_string())?;
+    serde_json::to_string_pretty(&rows).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn dictionary_list(store: State<'_, Arc<SqliteStore>>) -> Result<Vec<DictEntry>, String> {
     store.dictionary_list().map_err(|e| e.to_string())
 }
@@ -417,6 +439,16 @@ fn main() {
         }
     };
 
+    // History retention purge at startup (E2).
+    let retention_days = settings.general.history_retention_days;
+    if retention_days > 0 {
+        match store_state.history_purge_older_than_days(retention_days) {
+            Ok(n) if n > 0 => log::info!("purged {n} history row(s) older than {retention_days} days"),
+            Ok(_) => {}
+            Err(e) => log::warn!("history purge on startup failed: {e}"),
+        }
+    }
+
     let engine_handle = vf_engine::spawn(settings.clone(), store_state.clone() as Arc<dyn Store>);
     let engine_handle_for_setup = engine_handle.subscribe();
     let engine_handle_for_state = engine_handle;
@@ -484,14 +516,19 @@ fn main() {
 
             let main_window = app.get_webview_window("main").unwrap();
             let app_settings_state = app.state::<AppSettings>();
-            let start_min = {
+            // PRODUCT: always show main until Ready (keys + config). Only then honor start_minimized.
+            let (start_min, is_ready) = {
                 let s = app_settings_state.0.lock().unwrap();
-                s.general.start_minimized
+                let has_el = s.stt.api_keys.iter().any(|k| !k.trim().is_empty());
+                let has_groq = !s.llm.api_key.trim().is_empty()
+                    || matches!(s.llm.cleanup_level, vf_core::CleanupLevel::None);
+                (s.general.start_minimized, has_el && has_groq)
             };
-            if start_min {
+            if start_min && is_ready {
                 let _ = main_window.hide();
             } else {
                 let _ = main_window.show();
+                let _ = main_window.set_focus();
             }
 
             // Pre-warm Scratchpad webview so listeners are registered before first use.
@@ -552,6 +589,15 @@ fn main() {
                             log::info!("app-insert: {} chars", text.chars().count());
                             emit_app_insert(&app_handle, &text);
                         }
+                        EngineEvent::Injected { words, total_ms } => {
+                            let _ = app_handle.emit(
+                                "engine-injected",
+                                serde_json::json!({
+                                    "words": words,
+                                    "total_ms": total_ms,
+                                }),
+                            );
+                        }
                         _ => {}
                     }
                 }
@@ -575,6 +621,7 @@ fn main() {
             save_settings,
             list_groq_models,
             list_input_devices,
+            sample_mic_level,
             dictionary_list,
             dictionary_add,
             dictionary_update,
@@ -583,6 +630,8 @@ fn main() {
             history_list,
             history_delete,
             history_clear,
+            history_export,
+            dictionary_export,
             insights_summary,
             scratchpad_get,
             scratchpad_set,

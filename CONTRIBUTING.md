@@ -66,6 +66,41 @@ Agent brief files under `prompts/` and root `AGENTS.md` / `CLAUDE.md` are option
 - Do not add telemetry, accounts, or network calls beyond ElevenLabs STT and Groq LLM
 - Prefer small, focused pull requests with a clear description
 - Match existing code style (Rust 2021, no extra UI frameworks)
+- Product behavior: [docs/PRODUCT.md](docs/PRODUCT.md). Fix tracker: [docs/ISSUES-AND-FIX-PLAN.md](docs/ISSUES-AND-FIX-PLAN.md). Technical contracts: [CONTRACTS.md](CONTRACTS.md) (PRODUCT wins on behavior).
+
+## Manual regression checklist
+
+Run against a release build (`tauri build`) with real API keys when possible:
+
+```text
+Setup / first run
+[ ] Fresh install or empty keys: main window opens on Setup, Ready = Needs setup
+[ ] Add ElevenLabs + Groq keys → Save & apply → Ready green
+[ ] Hotkey while Needs setup → toast “Add your API keys…”, no long Recording state
+
+Dictation
+[ ] Notepad: hold Ctrl+Shift+Z, speak from first word → full phrase appears
+[ ] Overlay: Connecting… then Recording (with level), then Processing
+[ ] Cleanup None is faster; Medium still inserts cleaned text
+[ ] Speak into a browser text field and VS Code / similar
+
+Command mode
+[ ] Select text → hold Ctrl+Shift+X → Edit overlay → selection rewritten
+[ ] No selection → Generate overlay → new text at cursor
+[ ] Clear selection mid-hold after Edit started → toast about generate / insert
+
+Scratchpad & tray
+[ ] Ctrl+Shift+C toggles Scratchpad; dictate into it
+[ ] Close main window → app stays in tray; Quit only from tray menu
+
+Settings
+[ ] Change hotkey, Save & apply, re-test
+[ ] History: copy, delete row, clear all
+[ ] Start minimized only after Ready (first run always shows window)
+
+Cleanup
+[ ] Quit from tray: no stuck Ctrl/Shift in other apps
+```
 
 ## License
 

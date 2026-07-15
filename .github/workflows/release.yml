@@ -42,26 +42,32 @@ jobs:
         working-directory: app/ui
         run: npm ci
 
-      - name: Build production binary (Tauri, no installer bundle)
+      - name: Build production binary + installers
         working-directory: app
         shell: pwsh
         run: |
-          & .\ui\node_modules\.bin\tauri.cmd build --no-bundle
+          & .\ui\node_modules\.bin\tauri.cmd build
           if (-not (Test-Path ..\target\release\villflow.exe)) {
             throw "villflow.exe not found after build"
           }
 
-      - name: Upload artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: villflow-windows-x64
-          path: target/release/villflow.exe
+          path: |
+            target/release/villflow.exe
+            target/release/bundle/nsis/*.exe
+            target/release/bundle/msi/*.msi
           if-no-files-found: error
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: target/release/villflow.exe
+          files: |
+            target/release/villflow.exe
+            target/release/bundle/nsis/*.exe
+            target/release/bundle/msi/*.msi
           generate_release_notes: true
           body_path: CHANGELOG.md
         env:

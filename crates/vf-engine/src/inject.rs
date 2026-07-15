@@ -34,7 +34,8 @@ pub fn inject_text(
     restore_clipboard: bool,
 ) -> anyhow::Result<InjectOutcome> {
     // The user may still be holding Ctrl/Shift from the push-to-talk chord.
-    settle_modifiers(Duration::from_millis(800));
+    // Keep this short (PRODUCT A4) — force-release covers residual holds.
+    settle_modifiers(Duration::from_millis(120));
 
     if foreground_is_self() {
         force_release_all_modifiers();
@@ -137,11 +138,11 @@ fn inject_clipboard_paste(text: &str, restore_clipboard: bool) -> anyhow::Result
 
     clip.set_text(text.to_string())?;
     // Brief settle so the clipboard server publishes the new value before Ctrl+V.
-    thread::sleep(Duration::from_millis(20));
+    thread::sleep(Duration::from_millis(15));
     send_ctrl_v()?;
     // Wait for the target app to consume the paste before restoring. Too short
     // and some apps (Electron, Office) still read the restored previous clip.
-    thread::sleep(Duration::from_millis(120));
+    thread::sleep(Duration::from_millis(80));
 
     if restore_clipboard {
         match previous {

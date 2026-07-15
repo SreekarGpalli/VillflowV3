@@ -175,6 +175,28 @@ async function init() {
     triggerSave();
   });
 
+  document.getElementById("btn-numbers")?.addEventListener("click", () => {
+    document.execCommand("insertOrderedList", false);
+    editor?.focus();
+    triggerSave();
+  });
+
+  document.getElementById("btn-undo")?.addEventListener("click", () => {
+    document.execCommand("undo", false);
+    editor?.focus();
+    updateWordCount(editor?.innerText || "");
+    triggerSave();
+  });
+
+  document.getElementById("btn-clear")?.addEventListener("click", () => {
+    if (!editor) return;
+    if (!confirm("Clear the entire scratchpad?")) return;
+    editor.innerHTML = "";
+    updateWordCount("");
+    triggerSave();
+    editor.focus();
+  });
+
   try {
     const initialContent = await invoke<string>("scratchpad_get");
     editor.innerHTML = sanitizeHtml(initialContent);

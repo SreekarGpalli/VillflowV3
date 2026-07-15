@@ -10,6 +10,8 @@
 //!   `session_started`, `partial_transcript` { text }, `committed_transcript` { text },
 //!   plus error types: `auth_error`, `quota_exceeded`, `rate_limited`, `resource_exhausted`, etc.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use base64::Engine as _;
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
@@ -21,6 +23,10 @@ use tokio_tungstenite::{
 use vf_core::SttSettings;
 
 use crate::error::{CloudError, CloudResult};
+
+/// Last ElevenLabs key index that completed a successful handshake / utterance.
+/// Sticky across utterances so a dead first key is not retried every time (PRODUCT A5).
+static LAST_GOOD_KEY_INDEX: AtomicUsize = AtomicUsize::new(0);
 
 const SAMPLE_RATE: i32 = 16_000;
 const PATH: &str = "/v1/speech-to-text/realtime";
@@ -75,6 +81,11 @@ pub struct KeyRotator {
 
 impl KeyRotator {
     pub fn new(keys: Vec<String>) -> CloudResult<Self> {
+        Self::new_starting_at(keys, LAST_GOOD_KEY_INDEX.load(Ordering::SeqCst))
+    }
+
+    /// Build a rotator starting at `start` (clamped), for sticky key + tests.
+    pub fn new_starting_at(keys: Vec<String>, start: usize) -> CloudResult<Self> {
         let keys: Vec<String> = keys
             .into_iter()
             .map(|k| k.trim().to_string())
@@ -83,9 +94,10 @@ impl KeyRotator {
         if keys.is_empty() {
             return Err(CloudError::NoApiKeys);
         }
+        let current = start % keys.len();
         Ok(Self {
             keys,
-            current: 0,
+            current,
             tried: 0,
             last_error: None,
         })
@@ -95,8 +107,17 @@ impl KeyRotator {
         &self.keys[self.current]
     }
 
+    pub fn current_index(&self) -> usize {
+        self.current
+    }
+
     pub fn last_error(&self) -> Option<&str> {
         self.last_error.as_deref()
+    }
+
+    /// Remember this key as the preferred start for the next utterance.
+    pub fn mark_good(&self) {
+        LAST_GOOD_KEY_INDEX.store(self.current, Ordering::SeqCst);
     }
 
     /// Record a failure on the current key. Returns the next key if another
@@ -118,6 +139,12 @@ impl KeyRotator {
                 .unwrap_or_else(|| "unknown error".into()),
         )
     }
+}
+
+/// Test/helper: reset sticky key index (process-global).
+#[cfg(test)]
+pub fn reset_last_good_key_index_for_test() {
+    LAST_GOOD_KEY_INDEX.store(0, Ordering::SeqCst);
 }
 
 // ---------------------------------------------------------------------------
@@ -294,6 +321,7 @@ async fn session_loop(
     // Establish initial connection (with rotation on handshake failures).
     let mut conn = match connect_with_rotation(&settings, &keyterms, &mut rotator).await {
         Ok(c) => {
+            rotator.mark_good();
             let _ = ready_tx.send(Ok(()));
             c
         }
@@ -375,6 +403,7 @@ async fn session_loop(
                         }
 
                         if let Some(t) = held_transcript.take() {
+                            rotator.mark_good();
                             let _ = reply.send(Ok(t));
                             let _ = conn.ws.close(None).await;
                             return;
@@ -463,6 +492,7 @@ async fn session_loop(
                             | "committed_transcript_with_timestamps" => {
                                 let transcript = parsed.text.unwrap_or_default();
                                 if let Some(r) = commit_reply.take() {
+                                    rotator.mark_good();
                                     let _ = r.send(Ok(transcript));
                                     let _ = conn.ws.close(None).await;
                                     return;
@@ -751,6 +781,7 @@ mod tests {
 
     #[test]
     fn key_rotator_one_full_cycle() {
+        reset_last_good_key_index_for_test();
         let mut r = KeyRotator::new(vec!["k1".into(), "k2".into(), "k3".into()]).unwrap();
         assert_eq!(r.current_key(), "k1");
 
@@ -766,12 +797,25 @@ mod tests {
 
     #[test]
     fn key_rotator_single_key_fails_once() {
+        reset_last_good_key_index_for_test();
         let mut r = KeyRotator::new(vec!["only".into()]).unwrap();
         assert_eq!(r.fail_and_advance("boom"), None);
         assert!(matches!(
             r.aggregate_error(),
             CloudError::AllKeysFailed(msg) if msg == "boom"
         ));
+    }
+
+    #[test]
+    fn key_rotator_sticky_start() {
+        reset_last_good_key_index_for_test();
+        let mut r = KeyRotator::new(vec!["a".into(), "b".into(), "c".into()]).unwrap();
+        assert_eq!(r.fail_and_advance("fail a"), Some("b"));
+        r.mark_good();
+        let r2 = KeyRotator::new(vec!["a".into(), "b".into(), "c".into()]).unwrap();
+        assert_eq!(r2.current_key(), "b");
+        assert_eq!(r2.current_index(), 1);
+        reset_last_good_key_index_for_test();
     }
 
     #[test]

@@ -2,11 +2,9 @@
 
 **Windows push-to-talk voice dictation.** Hold a hotkey, speak, release — polished text lands at your cursor in any app.
 
-[![CI](https://github.com/OWNER/VillFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/VillFlow/actions/workflows/ci.yml)
+[![CI](https://github.com/SreekarGpalli/VillflowV3/actions/workflows/ci.yml/badge.svg)](https://github.com/SreekarGpalli/VillflowV3/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2011-0078D6)](#requirements)
-
-> Replace `OWNER` in the CI badge with your GitHub username or org after you push the repo.
 
 ---
 
@@ -15,8 +13,10 @@
 | Hotkey | Action |
 | ------ | ------ |
 | **Ctrl+Shift+Z** | Dictation — hold to speak, release to paste cleaned text |
-| **Ctrl+Shift+X** | Command mode — rewrite selected text, or generate when nothing is selected |
+| **Ctrl+Shift+X** | Command mode — **Edit** if text is selected (rewrite it); **Generate** if nothing is selected (insert new text at cursor). Overlay shows which mode. |
 | **Ctrl+Shift+C** | Toggle floating Scratchpad |
+
+Latency is **best effort** (cloud APIs vary; cleanup **None** is fastest). See [docs/PRODUCT.md](docs/PRODUCT.md).
 
 - **Tray-resident** — runs in the background; close the window to hide, not quit
 - **ElevenLabs** realtime speech-to-text with ordered API-key failover
@@ -34,7 +34,7 @@
 
 ## Download
 
-See [Releases](https://github.com/OWNER/VillFlow/releases) for prebuilt `villflow.exe` (when published).
+See [Releases](https://github.com/SreekarGpalli/VillflowV3/releases) for prebuilt `villflow.exe` (when published).
 
 Or build from source below.
 
@@ -49,8 +49,8 @@ Or build from source below.
 ### 2. Clone and install UI deps
 
 ```powershell
-git clone https://github.com/OWNER/VillFlow.git
-cd VillFlow
+git clone https://github.com/SreekarGpalli/VillflowV3.git
+cd VillflowV3
 cd app\ui
 npm install
 cd ..\..
@@ -65,13 +65,30 @@ ui\node_modules\.bin\tauri.cmd dev
 
 ### 4. Production build
 
+**Portable exe** (no installer):
+
 ```powershell
 cd app
 ui\node_modules\.bin\tauri.cmd build --no-bundle
 # → target\release\villflow.exe
 ```
 
+**Portable + installer** (NSIS/MSI under `target\release\bundle\`):
+
+```powershell
+cd app
+ui\node_modules\.bin\tauri.cmd build
+```
+
+GitHub Releases should attach **both** `villflow.exe` and the installer when possible.
+
 > ⚠️ **Do not use plain `cargo build` for the app.** That binary expects the Vite dev server (`localhost:5173`) and will show *connection refused* without it. Always build through the Tauri CLI so the UI is embedded.
+
+### First-run
+
+1. Open VillFlow (Setup tab is first).
+2. Add ElevenLabs + Groq keys → **Save & apply**.
+3. When Ready is green, hold **Ctrl+Shift+Z** in Notepad and speak.
 
 ### 5. Configure keys
 

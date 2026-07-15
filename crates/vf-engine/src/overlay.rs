@@ -15,31 +15,41 @@ use tokio::sync::mpsc;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, EndPaint, FillRect, GetDC, GetStockObject,
-    ReleaseDC, SelectObject, SetBkMode, SetTextColor, TextOutW, UpdateWindow, CLEARTYPE_QUALITY,
-    CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH, FW_SEMIBOLD, HBRUSH, OUT_DEFAULT_PRECIS,
-    TRANSPARENT, WHITE_BRUSH,
+    BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, EndPaint, FillRect, GetDC,
+    GetMonitorInfoW, GetStockObject, InvalidateRect, MonitorFromWindow, ReleaseDC, SelectObject,
+    SetBkMode, SetTextColor, TextOutW, UpdateWindow, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS,
+    DEFAULT_CHARSET, DEFAULT_PITCH, FW_SEMIBOLD, HBRUSH, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+    OUT_DEFAULT_PRECIS, TRANSPARENT, WHITE_BRUSH,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::Graphics::Gdi::InvalidateRect;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetSystemMetrics,
-    LoadCursorW, MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW, SetLayeredWindowAttributes,
-    SetWindowPos, ShowWindow, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, HICON,
-    HWND_TOPMOST, IDC_ARROW, LWA_ALPHA, MSG, SM_CXSCREEN, SM_CYSCREEN, SW_HIDE, SW_SHOWNOACTIVATE,
-    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, WM_DESTROY, WM_PAINT, WM_USER,
-    WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetForegroundWindow,
+    GetSystemMetrics, LoadCursorW, MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW,
+    SetLayeredWindowAttributes, SetWindowPos, ShowWindow, TranslateMessage, CS_HREDRAW, CS_VREDRAW,
+    CW_USEDEFAULT, HICON, HWND_TOPMOST, IDC_ARROW, LWA_ALPHA, MSG, SM_CXSCREEN, SM_CYSCREEN,
+    SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, WM_DESTROY,
+    WM_PAINT, WM_USER, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+    WS_POPUP,
 };
 
 const WM_OVERLAY_CMD: u32 = WM_USER + 40;
 const PILL_W_DEFAULT: i32 = 200;
-const PILL_W_TOAST_MAX: i32 = 420;
+const PILL_W_TOAST_MAX: i32 = 480;
 const PILL_H: i32 = 40;
+const PILL_H_PREVIEW: i32 = 56;
 
 #[derive(Debug, Clone)]
 pub enum OverlayState {
     Hidden,
-    Recording { level: f32 },
+    /// Pre-capture / STT handshake (PRODUCT overlay states).
+    Connecting,
+    /// Active capture: label is "Recording", "Edit", or "Generate".
+    /// `preview` is optional partial STT text (truncated).
+    Active {
+        label: String,
+        level: f32,
+        preview: String,
+    },
     Processing,
     Toast { message: String, until: Instant },
 }
@@ -174,7 +184,7 @@ fn run_overlay_thread(rx: &mut mpsc::UnboundedReceiver<OverlayCmd>) -> anyhow::R
             *shared.hwnd.lock().unwrap() = Some(SendHwnd(hwnd));
         }
 
-        position_bottom_center(hwnd, PILL_W_DEFAULT);
+        position_bottom_center(hwnd, PILL_W_DEFAULT, PILL_H);
         let _ = ShowWindow(hwnd, SW_HIDE);
 
         // Pump: interleave GetMessage with channel polls via a timer-like peek loop.
@@ -222,24 +232,55 @@ fn run_overlay_thread(rx: &mut mpsc::UnboundedReceiver<OverlayCmd>) -> anyhow::R
     Ok(())
 }
 
-/// Width for the current overlay state (wider for longer toast messages).
+/// Width for the current overlay state (wider for longer toast / preview).
 fn pill_width_for(state: &OverlayState) -> i32 {
     match state {
         OverlayState::Toast { message, .. } => {
-            // ~8px per char + padding; clamp to a readable max.
             let approx = 48 + (message.chars().count() as i32) * 8;
+            approx.clamp(PILL_W_DEFAULT, PILL_W_TOAST_MAX)
+        }
+        OverlayState::Active { preview, .. } if !preview.is_empty() => {
+            let approx = 48 + (preview.chars().count().min(48) as i32) * 7;
             approx.clamp(PILL_W_DEFAULT, PILL_W_TOAST_MAX)
         }
         _ => PILL_W_DEFAULT,
     }
 }
 
-unsafe fn position_bottom_center(hwnd: HWND, width: i32) {
-    let screen_w = GetSystemMetrics(SM_CXSCREEN);
-    let screen_h = GetSystemMetrics(SM_CYSCREEN);
-    let x = (screen_w - width) / 2;
-    let y = screen_h - PILL_H - 48;
-    let _ = MoveWindow(hwnd, x, y, width, PILL_H, true);
+fn pill_height_for(state: &OverlayState) -> i32 {
+    match state {
+        OverlayState::Active { preview, .. } if !preview.is_empty() => PILL_H_PREVIEW,
+        _ => PILL_H,
+    }
+}
+
+/// Bottom-center of the monitor that contains the foreground window (multi-monitor).
+unsafe fn position_bottom_center(hwnd: HWND, width: i32, height: i32) {
+    let fg = GetForegroundWindow();
+    let mut left = 0i32;
+    let mut top = 0i32;
+    let mut right = GetSystemMetrics(SM_CXSCREEN);
+    let mut bottom = GetSystemMetrics(SM_CYSCREEN);
+
+    if !fg.0.is_null() {
+        let mon = MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST);
+        let mut mi = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        if GetMonitorInfoW(mon, &mut mi).as_bool() {
+            left = mi.rcMonitor.left;
+            top = mi.rcMonitor.top;
+            right = mi.rcMonitor.right;
+            bottom = mi.rcMonitor.bottom;
+        }
+    }
+
+    let mon_w = right - left;
+    let mon_h = bottom - top;
+    let x = left + (mon_w - width) / 2;
+    let y = top + mon_h - height - 48;
+    let _ = MoveWindow(hwnd, x, y, width, height, true);
 }
 
 unsafe fn refresh_visibility(hwnd: HWND) {
@@ -253,7 +294,8 @@ unsafe fn refresh_visibility(hwnd: HWND) {
         }
         ref visible => {
             let width = pill_width_for(visible);
-            position_bottom_center(hwnd, width);
+            let height = pill_height_for(visible);
+            position_bottom_center(hwnd, width, height);
             // Re-assert TOPMOST on every show so the pill stays above Tauri
             // always-on-top windows (Scratchpad). Z-order among TOPMOST peers
             // is "last SetWindowPos wins".
@@ -299,11 +341,17 @@ unsafe fn paint(hwnd: HWND) {
         .map(|s| s.state.lock().unwrap().clone())
         .unwrap_or(OverlayState::Hidden);
     let pill_w = pill_width_for(&state);
-    let (label, level) = match state {
-        OverlayState::Hidden => (String::new(), 0.0f32),
-        OverlayState::Recording { level } => ("Recording".to_string(), level),
-        OverlayState::Processing => ("Processing".to_string(), 0.0),
-        OverlayState::Toast { message, .. } => (message, 0.0),
+    let pill_h = pill_height_for(&state);
+    let (label, level, preview) = match &state {
+        OverlayState::Hidden => (String::new(), 0.0f32, String::new()),
+        OverlayState::Connecting => ("Connecting…".to_string(), 0.0, String::new()),
+        OverlayState::Active {
+            label,
+            level,
+            preview,
+        } => (label.clone(), *level, preview.clone()),
+        OverlayState::Processing => ("Processing".to_string(), 0.0, String::new()),
+        OverlayState::Toast { message, .. } => (message.clone(), 0.0, String::new()),
     };
 
     // Background: RGB(0x1A, 0x1A, 0x22) dark blue-gray, stored as COLORREF 0x00BBGGRR.
@@ -312,21 +360,20 @@ unsafe fn paint(hwnd: HWND) {
         left: 0,
         top: 0,
         right: pill_w,
-        bottom: PILL_H,
+        bottom: pill_h,
     };
     let _ = FillRect(hdc, &rect, brush);
     let _ = DeleteObject(brush.into());
 
     // Level pulse bar under text when recording.
-    // Pulse: RGB(0x60, 0xA0, 0xC8) soft blue, stored as COLORREF 0x00BBGGRR.
     if level > 0.01 {
         let bar_w = ((pill_w as f32 - 24.0) * level.clamp(0.0, 1.0)) as i32;
         let pulse = CreateSolidBrush(COLORREF(0x00C8A060));
         let bar = RECT {
             left: 12,
-            top: PILL_H - 8,
+            top: pill_h - 8,
             right: 12 + bar_w.max(4),
-            bottom: PILL_H - 4,
+            bottom: pill_h - 4,
         };
         let _ = FillRect(hdc, &bar, pulse);
         let _ = DeleteObject(pulse.into());
@@ -354,13 +401,46 @@ unsafe fn paint(hwnd: HWND) {
     let old = SelectObject(hdc, font.into());
 
     let text_w = wide(&label);
-    let _ = TextOutW(hdc, 24, 10, &text_w[..text_w.len().saturating_sub(1)]);
+    let label_y = if preview.is_empty() { 10 } else { 6 };
+    let _ = TextOutW(hdc, 24, label_y, &text_w[..text_w.len().saturating_sub(1)]);
+
+    if !preview.is_empty() {
+        let _ = SetTextColor(hdc, COLORREF(0x00C0C0C0));
+        let small = CreateFontW(
+            13,
+            0,
+            0,
+            0,
+            400,
+            0,
+            0,
+            0,
+            DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS,
+            CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY,
+            DEFAULT_PITCH.0 as u32,
+            PCWSTR(wide("Segoe UI").as_ptr()),
+        );
+        let old_s = SelectObject(hdc, small.into());
+        let truncated: String = {
+            let t: String = preview.chars().take(56).collect();
+            if preview.chars().count() > 56 {
+                format!("{t}…")
+            } else {
+                t
+            }
+        };
+        let pw = wide(&truncated);
+        let _ = TextOutW(hdc, 24, 26, &pw[..pw.len().saturating_sub(1)]);
+        let _ = SelectObject(hdc, old_s);
+        let _ = DeleteObject(small.into());
+    }
 
     let _ = SelectObject(hdc, old);
     let _ = DeleteObject(font.into());
 
     let _ = EndPaint(hwnd, &ps);
-    // Keep GDI imports used when paint path is tree-shaken under certain cfgs.
     let _ = (GetDC, ReleaseDC);
 }
 
@@ -369,8 +449,31 @@ fn wide(s: &str) -> Vec<u16> {
 }
 
 /// Helpers used by the orchestrator.
+pub fn show_connecting(tx: &mpsc::UnboundedSender<OverlayCmd>) {
+    let _ = tx.send(OverlayCmd::Set(OverlayState::Connecting));
+}
+
+pub fn show_active(tx: &mpsc::UnboundedSender<OverlayCmd>, label: impl Into<String>, level: f32) {
+    show_active_with_preview(tx, label, level, "");
+}
+
+pub fn show_active_with_preview(
+    tx: &mpsc::UnboundedSender<OverlayCmd>,
+    label: impl Into<String>,
+    level: f32,
+    preview: impl Into<String>,
+) {
+    let _ = tx.send(OverlayCmd::Set(OverlayState::Active {
+        label: label.into(),
+        level,
+        preview: preview.into(),
+    }));
+}
+
+/// Dictation capture (label "Recording").
+#[allow(dead_code)]
 pub fn show_recording(tx: &mpsc::UnboundedSender<OverlayCmd>, level: f32) {
-    let _ = tx.send(OverlayCmd::Set(OverlayState::Recording { level }));
+    show_active(tx, "Recording", level);
 }
 
 pub fn show_processing(tx: &mpsc::UnboundedSender<OverlayCmd>) {

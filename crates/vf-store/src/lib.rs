@@ -5,6 +5,9 @@ use vf_core::{
     migrate_settings, DictEntry, HistoryEntry, InsightsSummary, Settings, Store,
 };
 
+mod secrets;
+pub use secrets::{protect_secret, unprotect_secret};
+
 // --- SETTINGS LOAD / SAVE ---
 
 pub fn get_default_settings_path() -> Option<PathBuf> {
@@ -33,10 +36,12 @@ pub fn load_settings(path: &Path) -> anyhow::Result<Settings> {
     // Missing fields on load -> filled from defaults via serde default attributes,
     // then migrate schema/prompts if needed, then re-saved.
     match serde_json::from_str::<Settings>(&content) {
-        Ok(settings) => {
+        Ok(mut settings) => {
+            // Decrypt DPAPI-wrapped keys (or leave legacy plaintext).
+            secrets::unprotect_settings_secrets(&mut settings);
             let (settings, migrated) = migrate_settings(settings);
             // Always re-save so defaults filled by serde are persisted; migrate may
-            // also have replaced legacy stock prompts.
+            // also have replaced legacy stock prompts; plaintext keys get DPAPI-wrapped.
             if migrated {
                 log::info!("settings migrated to schema v{}", settings.version);
             }
@@ -62,9 +67,12 @@ pub fn save_settings(settings: &Settings, path: &Path) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    
+
+    // Encrypt API keys for disk only; caller's in-memory settings stay plaintext.
+    let for_disk = secrets::protect_settings_for_disk(settings)?;
+
     let tmp_path = path.with_extension("tmp");
-    let serialized = serde_json::to_string_pretty(settings)?;
+    let serialized = serde_json::to_string_pretty(&for_disk)?;
     if let Err(e) = fs::write(&tmp_path, serialized) {
         let _ = fs::remove_file(&tmp_path);
         return Err(e.into());
@@ -135,10 +143,16 @@ impl SqliteStore {
               raw_transcript TEXT NOT NULL,
               final_text TEXT NOT NULL,
               duration_ms INTEGER NOT NULL DEFAULT 0,
+              speech_ms INTEGER NOT NULL DEFAULT 0,
               word_count INTEGER NOT NULL DEFAULT 0
             );",
             [],
         )?;
+        // Migrate pre-speech_ms databases.
+        let _ = conn.execute(
+            "ALTER TABLE history ADD COLUMN speech_ms INTEGER NOT NULL DEFAULT 0;",
+            [],
+        );
         conn.execute(
             "CREATE INDEX IF NOT EXISTS history_ts_idx ON history(ts);",
             [],
@@ -289,8 +303,8 @@ impl Store for SqliteStore {
         let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("DB Mutex poisoned"))?;
         if entry.ts.is_empty() {
             conn.execute(
-                "INSERT INTO history (ts, app_name, window_title, mode, raw_transcript, final_text, duration_ms, word_count) 
-                 VALUES (strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'), ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO history (ts, app_name, window_title, mode, raw_transcript, final_text, duration_ms, speech_ms, word_count) 
+                 VALUES (strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'), ?, ?, ?, ?, ?, ?, ?, ?)",
                 rusqlite::params![
                     entry.app_name,
                     entry.window_title,
@@ -298,13 +312,14 @@ impl Store for SqliteStore {
                     entry.raw_transcript,
                     entry.final_text,
                     entry.duration_ms,
+                    entry.speech_ms,
                     entry.word_count,
                 ],
             )?;
         } else {
             conn.execute(
-                "INSERT INTO history (ts, app_name, window_title, mode, raw_transcript, final_text, duration_ms, word_count) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO history (ts, app_name, window_title, mode, raw_transcript, final_text, duration_ms, speech_ms, word_count) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 rusqlite::params![
                     entry.ts,
                     entry.app_name,
@@ -313,6 +328,7 @@ impl Store for SqliteStore {
                     entry.raw_transcript,
                     entry.final_text,
                     entry.duration_ms,
+                    entry.speech_ms,
                     entry.word_count,
                 ],
             )?;
@@ -323,7 +339,7 @@ impl Store for SqliteStore {
     fn history_list(&self, limit: u32, offset: u32) -> anyhow::Result<Vec<HistoryEntry>> {
         let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("DB Mutex poisoned"))?;
         let mut stmt = conn.prepare(
-            "SELECT id, ts, app_name, window_title, mode, raw_transcript, final_text, duration_ms, word_count 
+            "SELECT id, ts, app_name, window_title, mode, raw_transcript, final_text, duration_ms, speech_ms, word_count 
              FROM history ORDER BY ts DESC, id DESC LIMIT ? OFFSET ?"
         )?;
         let rows = stmt.query_map(rusqlite::params![limit, offset], |row| {
@@ -336,7 +352,8 @@ impl Store for SqliteStore {
                 raw_transcript: row.get(5)?,
                 final_text: row.get(6)?,
                 duration_ms: row.get(7)?,
-                word_count: row.get(8)?,
+                speech_ms: row.get::<_, i64>(8).unwrap_or(0),
+                word_count: row.get(9)?,
             })
         })?;
         let mut list = Vec::new();
@@ -356,6 +373,19 @@ impl Store for SqliteStore {
         let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("DB Mutex poisoned"))?;
         conn.execute("DELETE FROM history", [])?;
         Ok(())
+    }
+
+    fn history_purge_older_than_days(&self, days: u32) -> anyhow::Result<u64> {
+        if days == 0 {
+            return Ok(0);
+        }
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("DB Mutex poisoned"))?;
+        // Compare date portion of local ISO ts (YYYY-MM-DD…).
+        let n = conn.execute(
+            "DELETE FROM history WHERE SUBSTR(ts, 1, 10) < date('now', 'localtime', ?)",
+            rusqlite::params![format!("-{days} days")],
+        )?;
+        Ok(n as u64)
     }
 
     fn scratchpad_get(&self) -> anyhow::Result<String> {
@@ -388,9 +418,11 @@ impl Store for SqliteStore {
         )?;
         let total_words = total_words.unwrap_or(0);
         
-        // 2. Average WPM
+        // 2. Average WPM — prefer speech_ms (hold time) when present, else duration_ms.
         let dictation_stats: Option<(i64, i64)> = conn.query_row(
-            "SELECT SUM(word_count), SUM(duration_ms) FROM history WHERE mode = 'dictation'",
+            "SELECT SUM(word_count),
+                    SUM(CASE WHEN speech_ms > 0 THEN speech_ms ELSE duration_ms END)
+             FROM history WHERE mode = 'dictation'",
             [],
             |row| {
                 let sum_words: Option<i64> = row.get(0)?;
@@ -578,6 +610,7 @@ mod tests {
             raw_transcript: "hello".to_string(),
             final_text: "hello".to_string(),
             duration_ms: 1000,
+            speech_ms: 1000,
             word_count: 1,
         };
         store.history_append(&h1).expect("Failed to append h1");
@@ -591,6 +624,7 @@ mod tests {
             raw_transcript: "world wide web".to_string(),
             final_text: "World Wide Web".to_string(),
             duration_ms: 2000,
+            speech_ms: 2000,
             word_count: 3,
         };
         store.history_append(&h2).expect("Failed to append h2");
@@ -604,6 +638,7 @@ mod tests {
             raw_transcript: "make it uppercase".to_string(),
             final_text: "MAKE IT UPPERCASE".to_string(),
             duration_ms: 5000,
+            speech_ms: 5000,
             word_count: 3,
         };
         store.history_append(&h_cmd).expect("Failed to append h_cmd");
