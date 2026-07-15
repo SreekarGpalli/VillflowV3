@@ -1070,6 +1070,7 @@ No new cloud APIs required for Phase 0 UI.
 | 2 Community | **done** |
 | 3 Security/polish | **done** |
 | 4 Release complete | **done** |
+| 5 UI redesign + Scratchpad rewrite + portable vault | **done** |
 
 **Non-goals (will not build):** accounts, telemetry, commercial packaging beyond portable+installer, full Wispr parity, multi-language v1.
 
