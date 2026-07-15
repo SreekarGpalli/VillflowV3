@@ -22,3 +22,9 @@ dirs = "5"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+
+# Production builds serve embedded UI from frontendDist.
+# `tauri dev` disables this via --no-default-features and uses devUrl instead.
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
