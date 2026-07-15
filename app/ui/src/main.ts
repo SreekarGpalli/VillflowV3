@@ -492,11 +492,11 @@ function updateReadyChecklist() {
   if (detail) detail.textContent = r.detail;
   if (banner) {
     banner.style.background = r.ready
-      ? "rgba(129,201,149,0.12)"
-      : "rgba(242,139,130,0.12)";
+      ? "rgba(109,213,140,0.10)"
+      : "rgba(242,184,181,0.10)";
     banner.style.borderColor = r.ready
-      ? "rgba(129,201,149,0.25)"
-      : "rgba(242,139,130,0.25)";
+      ? "rgba(109,213,140,0.28)"
+      : "rgba(242,184,181,0.28)";
   }
   const mark = (id: string, ok: boolean, label: string) => {
     const el = document.getElementById(id);
@@ -890,12 +890,12 @@ async function loadDictionary() {
       const row = document.createElement("tr");
       row.innerHTML = `
         <td><strong>${escapeHtml(entry.word)}</strong></td>
-        <td><span style="font-size:12px; padding:2px 6px; border-radius:4px; background:rgba(255,255,255,0.05);">${entry.source}</span></td>
+        <td><span style="font-size:12px; padding:2px 8px; border-radius:8px; background:rgba(168,199,250,0.12); color:var(--accent); font-weight:500;">${entry.source}</span></td>
         <td>${entry.use_count}</td>
         <td>
-          <span class="star-btn" style="cursor:pointer; color: ${entry.starred ? '#eab308' : 'var(--text-disabled)'};" data-id="${entry.id}">
+          <span class="star-btn" style="cursor:pointer; color: ${entry.starred ? '#fdd663' : 'var(--text-disabled)'};" data-id="${entry.id}">
             ${entry.starred 
-              ? `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="#eab308" stroke="#eab308" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>` 
+              ? `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="#fdd663" stroke="#fdd663" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>` 
               : `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>`
             }
           </span>
