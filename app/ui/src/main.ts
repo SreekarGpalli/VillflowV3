@@ -82,7 +82,7 @@ interface InsightsSummary {
 
 let savedSettings: Settings | null = null;
 let currentSettings: Settings | null = null;
-let activeTab = "setup";
+let activeTab = "overview";
 let editingWordId: number | null = null;
 let historyOffset = 0;
 const historyLimit = 15;
@@ -185,6 +185,8 @@ function setupTabs() {
       await loadHistory();
     } else if (tab === "insights") {
       await loadInsights();
+    } else if (tab === "overview") {
+      updateReadyChecklist();
     }
   };
 
@@ -428,9 +430,6 @@ function updateHotkeySummaries(settings: Settings) {
   set("howto-dictation", settings.hotkeys.dictation);
   set("howto-command", settings.hotkeys.command_mode);
   set("howto-scratchpad", settings.hotkeys.scratchpad);
-  set("setup-hk-dictation", settings.hotkeys.dictation);
-  set("setup-hk-command", settings.hotkeys.command_mode);
-  set("setup-hk-scratchpad", settings.hotkeys.scratchpad);
 }
 
 /** PRODUCT Ready checklist — mirrors engine gate logic for UX. */
@@ -638,9 +637,14 @@ function setupSetupTabHandlers() {
     currentSettings = gatherFormSettings();
     void saveAndApplySettings(true);
   });
-  document.getElementById("setup-goto-hotkeys")?.addEventListener("click", () => {
-    const item = document.querySelector('.nav-item[data-tab="hotkeys"]') as HTMLElement | null;
-    item?.click();
+
+  document.querySelectorAll("[data-goto]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const tab = btn.getAttribute("data-goto");
+      if (!tab) return;
+      const item = document.querySelector(`.nav-item[data-tab="${tab}"]`) as HTMLElement | null;
+      item?.click();
+    });
   });
 
   document.getElementById("groq-key-toggle")?.addEventListener("click", () => {

@@ -1003,17 +1003,17 @@
       </div>
     </div>
     <ul class="nav-list" role="tablist" aria-label="Settings sections">
-      <li class="nav-item active" data-tab="setup" role="tab" tabindex="0" aria-selected="true">Setup</li>
-      <li class="nav-item" data-tab="dictation">Dictation</li>
-      <li class="nav-item" data-tab="hotkeys">Hotkeys</li>
-      <li class="nav-item" data-tab="dictionary">Dictionary</li>
-      <li class="nav-item" data-tab="ai-services">Cloud Keys</li>
-      <li class="nav-item" data-tab="prompts">Prompts</li>
-      <li class="nav-item" data-tab="output">Output</li>
-      <li class="nav-item" data-tab="history">History</li>
-      <li class="nav-item" data-tab="insights">Insights</li>
-      <li class="nav-item" data-tab="general">General</li>
-      <li class="nav-item" data-tab="about">About</li>
+      <li class="nav-item active" data-tab="overview" role="tab" tabindex="0" aria-selected="true">Overview</li>
+      <li class="nav-item" data-tab="dictation" role="tab" tabindex="-1" aria-selected="false">Dictation</li>
+      <li class="nav-item" data-tab="hotkeys" role="tab" tabindex="-1" aria-selected="false">Hotkeys</li>
+      <li class="nav-item" data-tab="cloud" role="tab" tabindex="-1" aria-selected="false">Cloud &amp; keys</li>
+      <li class="nav-item" data-tab="dictionary" role="tab" tabindex="-1" aria-selected="false">Dictionary</li>
+      <li class="nav-item" data-tab="output" role="tab" tabindex="-1" aria-selected="false">Output</li>
+      <li class="nav-item" data-tab="prompts" role="tab" tabindex="-1" aria-selected="false">Prompts</li>
+      <li class="nav-item" data-tab="history" role="tab" tabindex="-1" aria-selected="false">History</li>
+      <li class="nav-item" data-tab="insights" role="tab" tabindex="-1" aria-selected="false">Insights</li>
+      <li class="nav-item" data-tab="app" role="tab" tabindex="-1" aria-selected="false">App</li>
+      <li class="nav-item" data-tab="about" role="tab" tabindex="-1" aria-selected="false">About</li>
     </ul>
     <div class="sidebar-footer">
       <span>v0.1.0</span>
@@ -1023,18 +1023,17 @@
   <!-- Content Container -->
   <main class="content-container">
 
-    <!-- Tab: Setup (default happy path) -->
-    <div class="tab-content active" id="tab-setup">
+    <!-- OVERVIEW: status only — no form fields duplicated elsewhere -->
+    <div class="tab-content active" id="tab-overview">
       <div class="page-header">
-        <h1>Setup</h1>
-        <p>Get dictation working. Advanced options are in the other tabs.</p>
+        <h1>Overview</h1>
+        <p>Status and how to dictate. Configure each area once in the menu on the left.</p>
       </div>
-
       <div class="card" id="setup-ready-card">
-        <div class="card-title">Ready</div>
-        <div id="setup-ready-banner" style="margin-bottom: 12px; padding: 12px 14px; border-radius: 10px; background: rgba(242,139,130,0.12); border: 1px solid rgba(242,139,130,0.25);">
+        <div class="card-title">Status</div>
+        <div id="setup-ready-banner" style="margin-bottom: 12px; padding: 12px 14px; border-radius: 10px; background: rgba(251,113,133,0.12); border: 1px solid rgba(251,113,133,0.25);">
           <strong id="setup-ready-title">Needs setup</strong>
-          <p id="setup-ready-detail" style="margin-top: 6px; color: var(--text-muted); font-size: 13px;">Add your API keys below, then Save &amp; apply.</p>
+          <p id="setup-ready-detail" style="margin-top: 6px; color: var(--text-muted); font-size: 13px;">Open Cloud &amp; keys to add API keys, then Save.</p>
         </div>
         <ul id="setup-ready-list" style="list-style: none; display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--text-muted);">
           <li id="setup-check-el">ElevenLabs API key</li>
@@ -1045,58 +1044,35 @@
         <p style="margin-top: 12px; font-size: 12px; color: var(--text-disabled);">Engine: <span id="setup-engine-state">Idle</span></p>
         <p style="margin-top: 4px; font-size: 12px; color: var(--text-disabled);">Last error: <span id="setup-last-error">(none)</span></p>
         <p style="margin-top: 4px; font-size: 12px; color: var(--text-disabled);">Last dictation: <span id="setup-last-dictation">(none yet)</span></p>
+        <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top: 16px;">
+          <button class="btn btn-primary" type="button" data-goto="cloud">Cloud &amp; keys</button>
+          <button class="btn" type="button" data-goto="dictation">Dictation</button>
+          <button class="btn" type="button" data-goto="hotkeys">Hotkeys</button>
+          <button class="btn btn-primary" type="button" id="setup-save-apply-btn">Save &amp; apply</button>
+        </div>
       </div>
-
       <div class="card">
         <div class="card-title">How to use</div>
         <ol id="setup-howto" style="padding-left: 18px; color: var(--text-muted); font-size: 13px; line-height: 1.55;">
+          <li>Add keys under <strong>Cloud &amp; keys</strong>, set mic under <strong>Dictation</strong>, then Save.</li>
           <li>Click in any text field (e.g. Notepad).</li>
-          <li>Hold <strong id="howto-dictation">Ctrl+Shift+Z</strong>, speak, release — polished text is pasted at the cursor.</li>
-          <li>Hold <strong id="howto-command">Ctrl+Shift+X</strong> for Command: rewrite a selection, or generate text when nothing is selected.</li>
+          <li>Hold <strong id="howto-dictation">Ctrl+Shift+Z</strong>, speak, release — text pastes at the cursor.</li>
+          <li>Hold <strong id="howto-command">Ctrl+Shift+X</strong> — Edit selection, or Generate if nothing selected.</li>
           <li><strong id="howto-scratchpad">Ctrl+Shift+C</strong> toggles the Scratchpad.</li>
-          <li>Keys stay in <code>%APPDATA%\VillFlow\</code> on this PC only.</li>
         </ol>
       </div>
+    </div>
 
-      <div class="card">
-        <div class="card-title">API keys</div>
-        <div class="form-group">
-          <label>ElevenLabs (speech-to-text)</label>
-          <p style="font-size: 12px; color: var(--text-disabled); margin-bottom: 8px;">
-            Get a key at <a href="https://elevenlabs.io" target="_blank" rel="noopener" style="color: var(--accent);">elevenlabs.io</a>. Keys are tried in order if one fails.
-          </p>
-          <div class="key-list-container" id="el-keys-list"></div>
-          <div class="form-row" style="margin-top: 8px;">
-            <input type="text" id="el-new-key" placeholder="Enter ElevenLabs API key…">
-            <button class="btn btn-primary" id="el-add-key-btn" type="button">Add Key</button>
-          </div>
-        </div>
-        <div class="form-group">
-          <label for="groq-key">Groq (cleanup / commands)</label>
-          <p style="font-size: 12px; color: var(--text-disabled); margin-bottom: 8px;">
-            Get a key at <a href="https://console.groq.com" target="_blank" rel="noopener" style="color: var(--accent);">console.groq.com</a>. Not required if cleanup is None.
-          </p>
-          <div class="form-row">
-            <input type="password" id="groq-key" placeholder="gsk_…" style="flex: 1;" autocomplete="off">
-            <button class="btn" type="button" id="groq-key-toggle" title="Show or hide key">Show</button>
-          </div>
-          <p style="font-size: 11px; color: var(--text-disabled); margin-top: 6px;">Keys are encrypted at rest with Windows DPAPI (current user).</p>
-        </div>
-        <div class="form-group">
-          <label for="groq-model">Groq model</label>
-          <div class="form-row">
-            <select id="groq-model">
-              <option value="openai/gpt-oss-120b">openai/gpt-oss-120b (default)</option>
-            </select>
-            <button class="btn" id="groq-refresh-btn" type="button" title="Refresh model list">Refresh</button>
-          </div>
-        </div>
+    <!-- DICTATION -->
+    <div class="tab-content" id="tab-dictation">
+      <div class="page-header">
+        <h1>Dictation</h1>
+        <p>Microphone, cleanup level, and continuity options.</p>
       </div>
-
       <div class="card">
         <div class="card-title">Microphone</div>
         <div class="form-group">
-          <label for="dict-audio-device">Active microphone</label>
+          <label for="dict-audio-device">Input device</label>
           <select id="dict-audio-device">
             <option value="system_default">System default</option>
           </select>
@@ -1106,100 +1082,108 @@
           <div id="setup-mic-meter" style="margin-top: 10px; height: 8px; background: rgba(255,255,255,0.06); border-radius: 4px; overflow: hidden;" aria-hidden="true">
             <div id="setup-mic-meter-fill" style="height: 100%; width: 0%; background: var(--accent); transition: width 0.15s ease;"></div>
           </div>
-          <p id="setup-mic-meter-label" style="font-size: 12px; color: var(--text-disabled); margin-top: 6px;">Click Test while speaking to check levels.</p>
+          <p id="setup-mic-meter-label" style="font-size: 12px; color: var(--text-disabled); margin-top: 6px;">Speak while testing to check levels.</p>
         </div>
       </div>
-
-      <div class="card">
-        <div class="card-title">Hotkeys</div>
-        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 10px;">
-          Dictation: <strong id="setup-hk-dictation">Ctrl+Shift+Z</strong><br>
-          Command: <strong id="setup-hk-command">Ctrl+Shift+X</strong><br>
-          Scratchpad: <strong id="setup-hk-scratchpad">Ctrl+Shift+C</strong>
-        </p>
-        <button class="btn" type="button" id="setup-goto-hotkeys">Change hotkeys…</button>
-      </div>
-
       <div class="card">
         <div class="card-title">Auto cleanup</div>
         <div class="form-group">
-          <label class="checkbox-label">
-            <input type="radio" name="dict-cleanup" value="none">
-            <div><span>None (raw transcript)</span><p>No Groq call — fastest.</p></div>
-          </label>
+          <label class="checkbox-label"><input type="radio" name="dict-cleanup" value="none"><div><span>None</span><p>Raw transcript, no Groq — fastest.</p></div></label>
         </div>
         <div class="form-group">
-          <label class="checkbox-label">
-            <input type="radio" name="dict-cleanup" value="light">
-            <div><span>Light</span><p>Filler and punctuation.</p></div>
-          </label>
+          <label class="checkbox-label"><input type="radio" name="dict-cleanup" value="light"><div><span>Light</span><p>Filler words and punctuation.</p></div></label>
         </div>
         <div class="form-group">
-          <label class="checkbox-label">
-            <input type="radio" name="dict-cleanup" value="medium" checked>
-            <div><span>Medium (recommended)</span><p>Grammar, lists, light polish.</p></div>
-          </label>
+          <label class="checkbox-label"><input type="radio" name="dict-cleanup" value="medium" checked><div><span>Medium (recommended)</span><p>Grammar, lists, light polish.</p></div></label>
         </div>
         <div class="form-group">
-          <label class="checkbox-label">
-            <input type="radio" name="dict-cleanup" value="high">
-            <div><span>High</span><p>Tighter wording.</p></div>
-          </label>
+          <label class="checkbox-label"><input type="radio" name="dict-cleanup" value="high"><div><span>High</span><p>Tighter wording, same meaning.</p></div></label>
         </div>
-      </div>
-
-      <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 24px;">
-        <button class="btn btn-primary" type="button" id="setup-save-apply-btn">Save &amp; apply</button>
-        <span style="font-size: 12px; color: var(--text-disabled);">Writes settings and updates the engine.</span>
-      </div>
-    </div>
-    
-    <!-- Tab: General -->
-    <div class="tab-content" id="tab-general">
-      <div class="page-header">
-        <h1>General Settings</h1>
-        <p>Startup behavior and notifications.</p>
       </div>
       <div class="card">
-        <div class="card-title">Startup & Behavior</div>
+        <div class="card-title">Continuity</div>
         <div class="form-group">
           <label class="checkbox-label">
-            <input type="checkbox" id="gen-launch-at-startup">
+            <input type="checkbox" id="llm-include-field-context">
             <div>
-              <span>Launch at Windows startup</span>
-              <p>Automatically launch VillFlow when your system turns on.</p>
+              <span>Include nearby document text</span>
+              <p>Sends text near the cursor to Groq for mid-sentence continuity. Off by default (can cause rewrites).</p>
             </div>
           </label>
         </div>
+      </div>
+    </div>
+
+    <!-- HOTKEYS -->
+    <div class="tab-content" id="tab-hotkeys">
+      <div class="page-header">
+        <h1>Hotkeys</h1>
+        <p>Global shortcuts. Click a field, then press the combo. Each needs a modifier.</p>
+      </div>
+      <div class="card">
+        <div class="card-title">Shortcuts</div>
         <div class="form-group">
-          <label class="checkbox-label">
-            <input type="checkbox" id="gen-start-minimized">
-            <div>
-              <span>Start minimized in System Tray</span>
-              <p>Launch the application hidden to the tray, ready in background.</p>
-            </div>
-          </label>
+          <label for="hk-dictation">Dictation (push-to-talk)</label>
+          <input type="text" id="hk-dictation" readonly placeholder="Press shortcut keys…">
         </div>
         <div class="form-group">
-          <label class="checkbox-label">
-            <input type="checkbox" id="gen-show-notifications">
-            <div>
-              <span>Show error notifications</span>
-              <p>Display Windows desktop notifications if API or recording errors occur.</p>
-            </div>
-          </label>
+          <label for="hk-command">Command (edit selection or generate)</label>
+          <input type="text" id="hk-command" readonly placeholder="Press shortcut keys…">
         </div>
         <div class="form-group">
-          <label for="gen-history-retention">History retention</label>
-          <select id="gen-history-retention" aria-describedby="gen-history-retention-help">
-            <option value="0">Keep forever</option>
-            <option value="30">Delete after 30 days</option>
-            <option value="90">Delete after 90 days</option>
-            <option value="365">Delete after 365 days</option>
-          </select>
-          <p id="gen-history-retention-help" style="font-size: 12px; color: var(--text-disabled); margin-top: 6px;">
-            Older transcripts are removed automatically after each dictation when a limit is set.
+          <label for="hk-scratchpad">Scratchpad toggle</label>
+          <input type="text" id="hk-scratchpad" readonly placeholder="Press shortcut keys…">
+        </div>
+      </div>
+    </div>
+
+    <!-- CLOUD -->
+    <div class="tab-content" id="tab-cloud">
+      <div class="page-header">
+        <h1>Cloud &amp; keys</h1>
+        <p>ElevenLabs speech, Groq cleanup, and how keys are stored.</p>
+      </div>
+      <div class="card">
+        <div class="card-title">ElevenLabs (speech-to-text)</div>
+        <div class="form-group">
+          <label>API keys (tried in order if one fails)</label>
+          <p style="font-size: 12px; color: var(--text-disabled); margin-bottom: 8px;">
+            <a href="https://elevenlabs.io" target="_blank" rel="noopener" style="color: var(--accent);">Get a key</a>
           </p>
+          <div class="key-list-container" id="el-keys-list"></div>
+          <div class="form-row" style="margin-top: 8px;">
+            <input type="text" id="el-new-key" placeholder="ElevenLabs API key…" autocomplete="off">
+            <button class="btn btn-primary" id="el-add-key-btn" type="button">Add</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="el-endpoint">STT endpoint</label>
+          <select id="el-endpoint">
+            <option value="wss://api.elevenlabs.io">United States</option>
+            <option value="wss://api.in.residency.elevenlabs.io">India residency</option>
+          </select>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Groq (cleanup &amp; commands)</div>
+        <div class="form-group">
+          <label for="groq-key">API key</label>
+          <p style="font-size: 12px; color: var(--text-disabled); margin-bottom: 8px;">
+            <a href="https://console.groq.com" target="_blank" rel="noopener" style="color: var(--accent);">Get a key</a> · not required if cleanup is None
+          </p>
+          <div class="form-row">
+            <input type="password" id="groq-key" placeholder="gsk_…" style="flex: 1;" autocomplete="off">
+            <button class="btn" type="button" id="groq-key-toggle">Show</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="groq-model">Model</label>
+          <div class="form-row">
+            <select id="groq-model">
+              <option value="openai/gpt-oss-120b">openai/gpt-oss-120b (default)</option>
+            </select>
+            <button class="btn" id="groq-refresh-btn" type="button">Refresh</button>
+          </div>
         </div>
       </div>
       <div class="card">
@@ -1218,66 +1202,23 @@
           <button class="btn" type="button" id="vault-unlock-btn">Unlock vault</button>
         </div>
         <p style="font-size: 12px; color: var(--text-disabled);">
-          Passphrase mode encrypts keys so you can copy settings to another PC. DPAPI is automatic for this Windows user.
+          Passphrase mode is portable across PCs. DPAPI is automatic for this Windows account.
         </p>
       </div>
     </div>
 
-    <!-- Tab: Dictation (advanced details; mic/cleanup live on Setup) -->
-    <div class="tab-content" id="tab-dictation">
-      <div class="page-header">
-        <h1>Dictation Options</h1>
-        <p>Advanced continuity options. Microphone and cleanup level are on <strong>Setup</strong>.</p>
-      </div>
-      <div class="card">
-        <div class="card-title">Advanced</div>
-        <div class="form-group">
-          <label class="checkbox-label">
-            <input type="checkbox" id="llm-include-field-context">
-            <div>
-              <span>Include nearby text for continuity</span>
-              <p>Sends text around the cursor to Groq so mid-sentence dictation can continue smoothly. Off by default — can cause the model to rewrite your document.</p>
-            </div>
-          </label>
-        </div>
-      </div>
-    </div>
-
-    <!-- Tab 3: Hotkeys -->
-    <div class="tab-content" id="tab-hotkeys">
-      <div class="page-header">
-        <h1>System Hotkeys</h1>
-        <p>These shortcuts work in any app. Hold to talk, release to insert.</p>
-      </div>
-      <div class="card">
-        <div class="card-title">Global Shortcuts</div>
-        <div class="form-group">
-          <label for="hk-dictation">Voice Dictation (Push-to-Talk)</label>
-          <input type="text" id="hk-dictation" readonly placeholder="Press shortcut keys...">
-        </div>
-        <div class="form-group">
-          <label for="hk-command">Command Mode (edit selection, or generate text when nothing is selected)</label>
-          <input type="text" id="hk-command" readonly placeholder="Press shortcut keys...">
-        </div>
-        <div class="form-group">
-          <label for="hk-scratchpad">Toggle Scratchpad Window</label>
-          <input type="text" id="hk-scratchpad" readonly placeholder="Press shortcut keys...">
-        </div>
-      </div>
-    </div>
-
-    <!-- Tab 4: Dictionary -->
+    <!-- DICTIONARY -->
     <div class="tab-content" id="tab-dictionary">
       <div class="page-header">
-        <h1>Spelling Dictionary</h1>
-        <p>Names and terms VillFlow should always spell your way.</p>
+        <h1>Dictionary</h1>
+        <p>Preferred spellings for names and terms.</p>
       </div>
       <div class="card">
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; margin-bottom: 4px;">
-          <div class="card-title" style="border: none; margin-bottom: 0; padding-bottom: 0;">Custom Words</div>
+          <div class="card-title" style="border: none; margin-bottom: 0; padding-bottom: 0;">Words</div>
           <div style="display:flex; gap:8px;">
-            <button class="btn btn-sm" type="button" id="dict-export-btn">Export JSON</button>
-            <button class="btn btn-primary btn-sm" id="dict-add-btn" type="button">+ Add Word</button>
+            <button class="btn btn-sm" type="button" id="dict-export-btn">Export</button>
+            <button class="btn btn-primary btn-sm" id="dict-add-btn" type="button">Add word</button>
           </div>
         </div>
         <div class="form-group">
@@ -1285,7 +1226,7 @@
             <input type="checkbox" id="dict-auto-learn">
             <div>
               <span>Auto-learn corrections</span>
-              <p>If you fix a word right after dictating, remember your spelling for next time.</p>
+              <p>If you fix a word after dictating, remember it (off by default).</p>
             </div>
           </label>
         </div>
@@ -1300,150 +1241,113 @@
                 <th>Actions</th>
               </tr>
             </thead>
-            <tbody id="dict-table-body">
-              <!-- Dictionary entries injected here -->
-            </tbody>
+            <tbody id="dict-table-body"></tbody>
           </table>
         </div>
       </div>
     </div>
 
-    <!-- Tab: Cloud Keys (endpoint + note; keys edited on Setup) -->
-    <div class="tab-content" id="tab-ai-services">
-      <div class="page-header">
-        <h1>Cloud Keys</h1>
-        <p>Endpoint and advanced STT host. Add or reorder API keys on the <strong>Setup</strong> tab.</p>
-      </div>
-      <div class="card">
-        <div class="card-title">ElevenLabs endpoint</div>
-        <div class="form-group">
-          <label for="el-endpoint">STT WebSocket Host</label>
-          <select id="el-endpoint">
-            <option value="wss://api.elevenlabs.io">United States (wss://api.elevenlabs.io)</option>
-            <option value="wss://api.in.residency.elevenlabs.io">India (wss://api.in.residency.elevenlabs.io)</option>
-          </select>
-        </div>
-        <p style="font-size: 13px; color: var(--text-muted);">API keys and Groq model are managed on Setup. Keys never leave this PC except for ElevenLabs / Groq API calls.</p>
-      </div>
-    </div>
-
-    <!-- Tab 6: Prompts -->
-    <div class="tab-content" id="tab-prompts">
-      <div class="page-header">
-        <h1>Prompts</h1>
-        <p>The exact instructions sent to the cleanup model. Placeholders in braces are filled in automatically.</p>
-      </div>
-
-      <div class="card">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <div class="card-title" style="border:none; margin:0; padding:0;">Cleanup — Light</div>
-          <button class="btn btn-sm" data-reset-prompt="light">Reset to Default</button>
-        </div>
-        <textarea id="prompt-light-text" rows="5"></textarea>
-      </div>
-
-      <div class="card">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <div class="card-title" style="border:none; margin:0; padding:0;">Cleanup — Medium</div>
-          <button class="btn btn-sm" data-reset-prompt="medium">Reset to Default</button>
-        </div>
-        <textarea id="prompt-medium-text" rows="5"></textarea>
-      </div>
-
-      <div class="card">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <div class="card-title" style="border:none; margin:0; padding:0;">Cleanup — High</div>
-          <button class="btn btn-sm" data-reset-prompt="high">Reset to Default</button>
-        </div>
-        <textarea id="prompt-high-text" rows="5"></textarea>
-      </div>
-
-      <div class="card">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <div class="card-title" style="border:none; margin:0; padding:0;">Command — Edit Selection</div>
-          <button class="btn btn-sm" data-reset-prompt="command">Reset to Default</button>
-        </div>
-        <textarea id="prompt-command-text" rows="5"></textarea>
-      </div>
-
-      <div class="card">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <div class="card-title" style="border:none; margin:0; padding:0;">Command — Generate (nothing selected)</div>
-          <button class="btn btn-sm" data-reset-prompt="command_generate">Reset to Default</button>
-        </div>
-        <textarea id="prompt-command_generate-text" rows="5"></textarea>
-      </div>
-    </div>
-
-    <!-- Tab 7: Output -->
+    <!-- OUTPUT -->
     <div class="tab-content" id="tab-output">
       <div class="page-header">
         <h1>Output</h1>
-        <p>How finished text gets inserted at your cursor.</p>
+        <p>How finished text is inserted at the cursor.</p>
       </div>
       <div class="card">
-        <div class="card-title">Injection Method</div>
+        <div class="card-title">Injection</div>
         <div class="form-group">
           <label class="checkbox-label">
             <input type="radio" name="out-method" value="clipboard_paste">
-            <div>
-              <span>Clipboard Paste (Fastest)</span>
-              <p>Pastes the result in one go. Works in most apps.</p>
-            </div>
+            <div><span>Clipboard paste</span><p>Fast. Works in most apps.</p></div>
           </label>
         </div>
         <div class="form-group">
           <label class="checkbox-label">
             <input type="radio" name="out-method" value="sendinput_typing">
-            <div>
-              <span>Simulated Typing (Safe)</span>
-              <p>Types the result character by character. For apps that block pasting.</p>
-            </div>
+            <div><span>Simulated typing</span><p>Slower. For apps that block paste.</p></div>
           </label>
         </div>
       </div>
       <div class="card">
-        <div class="card-title">Clipboard Settings</div>
+        <div class="card-title">Clipboard</div>
         <div class="form-group">
           <label class="checkbox-label">
             <input type="checkbox" id="out-restore-clipboard">
-            <div>
-              <span>Restore clipboard contents</span>
-              <p>Put whatever was on your clipboard back after pasting.</p>
-            </div>
+            <div><span>Restore clipboard after paste</span><p>Puts your previous clipboard content back.</p></div>
           </label>
         </div>
       </div>
     </div>
 
-    <!-- Tab 8: History -->
-    <div class="tab-content" id="tab-history">
+    <!-- PROMPTS -->
+    <div class="tab-content" id="tab-prompts">
       <div class="page-header">
-        <h1>Dictation History</h1>
-        <p>Your recent dictations. Click a row to see the raw transcript.</p>
+        <h1>Prompts</h1>
+        <p>System prompts sent to Groq. Placeholders like {dictionary} are filled automatically.</p>
       </div>
-      <div style="display:flex; justify-content:flex-end; margin-bottom: 4px;">
-        <button class="btn btn-sm" id="history-export-btn" type="button">Export JSON</button>
-        <button class="btn btn-sm btn-danger" id="history-clear-all-btn">Clear All</button>
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div class="card-title" style="border:none; margin:0; padding:0;">Light cleanup</div>
+          <button class="btn btn-sm" data-reset-prompt="light" type="button">Reset</button>
+        </div>
+        <textarea id="prompt-light-text" rows="5"></textarea>
       </div>
-      <div id="history-container">
-        <!-- History entries will be generated here -->
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div class="card-title" style="border:none; margin:0; padding:0;">Medium cleanup</div>
+          <button class="btn btn-sm" data-reset-prompt="medium" type="button">Reset</button>
+        </div>
+        <textarea id="prompt-medium-text" rows="5"></textarea>
       </div>
-      <div style="display: flex; justify-content: center; margin-top: 16px; margin-bottom: 24px;">
-        <button class="btn btn-primary" id="history-load-more-btn" style="display: none;">Load More</button>
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div class="card-title" style="border:none; margin:0; padding:0;">High cleanup</div>
+          <button class="btn btn-sm" data-reset-prompt="high" type="button">Reset</button>
+        </div>
+        <textarea id="prompt-high-text" rows="5"></textarea>
+      </div>
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div class="card-title" style="border:none; margin:0; padding:0;">Command — edit selection</div>
+          <button class="btn btn-sm" data-reset-prompt="command" type="button">Reset</button>
+        </div>
+        <textarea id="prompt-command-text" rows="5"></textarea>
+      </div>
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div class="card-title" style="border:none; margin:0; padding:0;">Command — generate</div>
+          <button class="btn btn-sm" data-reset-prompt="command_generate" type="button">Reset</button>
+        </div>
+        <textarea id="prompt-command_generate-text" rows="5"></textarea>
       </div>
     </div>
 
-    <!-- Tab 9: Insights -->
+    <!-- HISTORY -->
+    <div class="tab-content" id="tab-history">
+      <div class="page-header">
+        <h1>History</h1>
+        <p>Recent dictations. Expand a row for the raw transcript.</p>
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:8px; margin-bottom: 8px;">
+        <button class="btn btn-sm" id="history-export-btn" type="button">Export JSON</button>
+        <button class="btn btn-sm btn-danger" id="history-clear-all-btn" type="button">Clear all</button>
+      </div>
+      <div id="history-container"></div>
+      <div style="display: flex; justify-content: center; margin-top: 16px; margin-bottom: 24px;">
+        <button class="btn btn-primary" id="history-load-more-btn" style="display: none;" type="button">Load more</button>
+      </div>
+    </div>
+
+    <!-- INSIGHTS -->
     <div class="tab-content" id="tab-insights">
       <div class="page-header">
-        <h1>Insights & Activity</h1>
-        <p>How much you dictate, how fast, and where.</p>
+        <h1>Insights</h1>
+        <p>Volume, speed, and where you dictate.</p>
       </div>
       <div class="stats-grid">
         <div class="stat-card">
           <div class="stat-value" id="insight-total-words">0</div>
-          <div class="stat-label">Total Words Dictated</div>
+          <div class="stat-label">Total words</div>
         </div>
         <div class="stat-card">
           <div class="stat-value" id="insight-avg-wpm">0.0</div>
@@ -1451,66 +1355,104 @@
         </div>
       </div>
       <div class="card">
-        <div class="card-title">Top 5 Target Apps</div>
-        <div class="top-apps-list" id="insight-top-apps">
-          <!-- Top apps lists inject here -->
-        </div>
+        <div class="card-title">Top apps</div>
+        <div class="top-apps-list" id="insight-top-apps"></div>
       </div>
       <div class="card">
-        <div class="card-title">Activity Streak (365 Days)</div>
+        <div class="card-title">Activity (365 days)</div>
         <div class="heatmap-container">
-          <div class="heatmap-grid" id="heatmap-grid">
-            <!-- Heatmap grid elements injected here -->
-          </div>
+          <div class="heatmap-grid" id="heatmap-grid"></div>
           <div class="heatmap-legend">
             <span>Less</span>
             <div class="heatmap-legend-box" style="background-color: rgba(255,255,255,0.05)"></div>
-            <div class="heatmap-legend-box" style="background-color: #004a77"></div>
-            <div class="heatmap-legend-box" style="background-color: #00639b"></div>
-            <div class="heatmap-legend-box" style="background-color: #007ec1"></div>
-            <div class="heatmap-legend-box" style="background-color: #a8c7fa"></div>
+            <div class="heatmap-legend-box" style="background-color: #0f766e"></div>
+            <div class="heatmap-legend-box" style="background-color: #0d9488"></div>
+            <div class="heatmap-legend-box" style="background-color: #14b8a6"></div>
+            <div class="heatmap-legend-box" style="background-color: #2dd4bf"></div>
             <span>More</span>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Tab 10: About -->
+    <!-- APP -->
+    <div class="tab-content" id="tab-app">
+      <div class="page-header">
+        <h1>App</h1>
+        <p>Startup, notifications, and data retention.</p>
+      </div>
+      <div class="card">
+        <div class="card-title">Startup</div>
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="gen-launch-at-startup">
+            <div><span>Launch at Windows startup</span><p>Start VillFlow when you sign in.</p></div>
+          </label>
+        </div>
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="gen-start-minimized">
+            <div><span>Start minimized to tray</span><p>Honored after you are Ready (first run still shows this window).</p></div>
+          </label>
+        </div>
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="gen-show-notifications">
+            <div><span>Show error notifications</span><p>Windows toasts on API or recording errors.</p></div>
+          </label>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">History retention</div>
+        <div class="form-group">
+          <label for="gen-history-retention">Keep history for</label>
+          <select id="gen-history-retention">
+            <option value="0">Forever</option>
+            <option value="30">30 days</option>
+            <option value="90">90 days</option>
+            <option value="365">365 days</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- ABOUT -->
     <div class="tab-content" id="tab-about">
       <div class="page-header">
-        <h1>About VillFlow</h1>
-        <p>Product information.</p>
+        <h1>About</h1>
+        <p>Product and privacy.</p>
       </div>
       <div class="card" style="align-items: center; text-align: center; gap: 16px; padding: 40px 24px;">
         <div class="logo-badge" style="width:60px; height:60px; font-size:28px; border-radius:18px;">V3</div>
         <h2 style="font-size:24px; font-weight:800;">VillFlow</h2>
         <p style="color:var(--text-muted); font-size:14px; max-width: 500px;">
-          Open-source Windows push-to-talk dictation. Hold a key, speak, release — clean text lands at your cursor. No accounts, no telemetry.
+          Open-source Windows push-to-talk dictation. No accounts, no telemetry.
         </p>
         <div style="font-size: 13px; color:var(--text-disabled); display: flex; flex-direction:column; gap:4px; margin: 12px 0;">
-          <span>Version 0.1.0 for Windows 11 (x64)</span>
-          <span>MIT License · Keys encrypted at rest (Windows DPAPI)</span>
-          <span>Data: %APPDATA%\VillFlow\</span>
+          <span>Version 0.1.0 · Windows 11 x64</span>
+          <span>MIT License · DPAPI or passphrase vault</span>
+          <span>%APPDATA%\VillFlow\</span>
         </div>
         <div style="display:flex; gap:16px; flex-wrap: wrap; justify-content: center;">
           <a href="https://github.com/SreekarGpalli/VillflowV3" target="_blank" rel="noopener" style="color:var(--accent); font-size:13px; font-weight:600; text-decoration:none;">GitHub</a>
           <span style="color:var(--border-color);">|</span>
-          <a href="https://elevenlabs.io/docs/api-reference/speech-to-text/v-1-speech-to-text-realtime" target="_blank" rel="noopener" style="color:var(--accent); font-size:13px; font-weight:600; text-decoration:none;">ElevenLabs API</a>
+          <a href="https://elevenlabs.io/docs/api-reference/speech-to-text/v-1-speech-to-text-realtime" target="_blank" rel="noopener" style="color:var(--accent); font-size:13px; font-weight:600; text-decoration:none;">ElevenLabs</a>
           <span style="color:var(--border-color);">|</span>
-          <a href="https://console.groq.com/docs" target="_blank" rel="noopener" style="color:var(--accent); font-size:13px; font-weight:600; text-decoration:none;">Groq Console</a>
+          <a href="https://console.groq.com/docs" target="_blank" rel="noopener" style="color:var(--accent); font-size:13px; font-weight:600; text-decoration:none;">Groq</a>
         </div>
       </div>
     </div>
 
     <!-- Floating Save Settings Bar -->
     <div class="save-bar" id="save-bar">
-      <div class="save-bar-text">You have unsaved configuration changes.</div>
+      <div class="save-bar-text">Unsaved changes</div>
       <div style="display: flex; gap: 8px;">
-        <button class="btn btn-sm" id="save-discard-btn">Discard</button>
-        <button class="btn btn-primary btn-sm" id="save-confirm-btn">Save Changes</button>
+        <button class="btn btn-sm" id="save-discard-btn" type="button">Discard</button>
+        <button class="btn btn-primary btn-sm" id="save-confirm-btn" type="button">Save &amp; apply</button>
       </div>
     </div>
 
+  </main>
   </main>
 
   <!-- Add/Edit Word Modal -->
