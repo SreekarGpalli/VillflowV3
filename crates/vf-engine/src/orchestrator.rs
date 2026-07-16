@@ -200,10 +200,8 @@ pub async fn run(
                         if rt.state == EngineState::Idle {
                             if let Err(msg) = check_ready(&rt.settings, UtteranceMode::Dictation) {
                                 inject::force_release_all_modifiers();
-                                overlay::show_toast(&rt.overlay_tx, msg);
-                                rt.emit(EngineEvent::Error(
-                                    "Add your API keys in Setup.".into(),
-                                ));
+                                overlay::show_toast(&rt.overlay_tx, &msg);
+                                rt.emit(EngineEvent::Error(msg));
                             } else {
                                 begin_utterance(&mut rt, UtteranceMode::Dictation).await;
                             }
@@ -221,10 +219,8 @@ pub async fn run(
                                 check_ready(&rt.settings, UtteranceMode::CommandGenerate)
                             {
                                 inject::force_release_all_modifiers();
-                                overlay::show_toast(&rt.overlay_tx, msg);
-                                rt.emit(EngineEvent::Error(
-                                    "Add your API keys in Setup.".into(),
-                                ));
+                                overlay::show_toast(&rt.overlay_tx, &msg);
+                                rt.emit(EngineEvent::Error(msg));
                             } else {
                                 // Selection is optional: with one → Edit; without → Generate.
                                 let selection = tokio::task::spawn_blocking(
@@ -483,8 +479,9 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
     let mut ctx = active.context;
     let started = active.started;
 
-    // For command-edit: refresh selection just before the LLM so we transform
-    // what is currently selected if the user adjusted it mid-hold.
+    // For command-edit: prefer a refreshed selection if still available (user
+    // adjusted mid-hold). If re-read fails, keep the selection captured at
+    // key-down and stay on Edit (PRODUCT: do not demote to Generate).
     let mut effective_mode = mode;
     if mode == UtteranceMode::CommandEdit {
         let fresh = tokio::task::spawn_blocking(context::read_selection_with_fallback)
@@ -494,11 +491,17 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
             .filter(|s| !s.trim().is_empty());
         if let Some(sel) = fresh {
             ctx.selection = Some(sel);
+        } else if ctx
+            .selection
+            .as_ref()
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false)
+        {
+            log::info!("command-edit: re-read empty; using selection from key-down");
         } else {
-            // Lost selection → generate path (PRODUCT dual mode). Warn once (C2).
-            ctx.selection = None;
+            // Started as Edit without stored selection (shouldn't happen) — Generate.
             effective_mode = UtteranceMode::CommandGenerate;
-            log::info!("command-edit lost selection; treating as generate");
+            log::warn!("command-edit had no selection; falling back to generate");
             overlay::show_toast(
                 &rt.overlay_tx,
                 "No selection — generating at cursor",
