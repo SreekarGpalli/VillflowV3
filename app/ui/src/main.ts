@@ -292,12 +292,12 @@ function populateForm(settings: Settings) {
 
   const maxTok = document.getElementById("groq-max-tokens") as HTMLSelectElement | null;
   if (maxTok) {
-    const allowed = [1024, 2048, 4096, 8192];
-    let t = settings.llm.max_completion_tokens ?? 8192;
+    const allowed = [1024, 2048, 4096];
+    let t = settings.llm.max_completion_tokens ?? 2048;
     if (!allowed.includes(t)) {
       t = allowed.reduce((best, p) =>
         Math.abs(p - t) < Math.abs(best - t) ? p : best
-      , 8192);
+      , 2048);
     }
     maxTok.value = String(t);
   }
@@ -372,9 +372,9 @@ function gatherFormSettings(): Settings {
         (document.getElementById("llm-include-field-context") as HTMLInputElement | null)
           ?.checked ?? false,
       max_completion_tokens: parseInt(
-        (document.getElementById("groq-max-tokens") as HTMLSelectElement | null)?.value || "8192",
+        (document.getElementById("groq-max-tokens") as HTMLSelectElement | null)?.value || "2048",
         10,
-      ) || 8192,
+      ) || 2048,
     },
     prompts: {
       light: (document.getElementById("prompt-light-text") as HTMLTextAreaElement).value,

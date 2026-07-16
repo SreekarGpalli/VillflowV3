@@ -86,7 +86,7 @@ Single process (Tauri). Startup: load settings → spawn engine thread (owns a t
 
 - `POST https://api.groq.com/openai/v1/chat/completions`, `Authorization: Bearer <llm.api_key>`. OpenAI-compatible.
 - Model = `llm.model`; shipped default `"openai/gpt-oss-120b"`. Model picker data: `GET https://api.groq.com/openai/v1/models` → list of ids (fetched live by the UI via `list_groq_models`).
-- Request: non-streaming, `temperature 0.2`, `max_completion_tokens` from settings presets (`1024` / `2048` / `4096` / `8192`, default `8192`). Result = `choices[0].message.content`, trimmed; strip wrapping quotes/code fences if present.
+- Request: non-streaming, `temperature 0.2`, `max_completion_tokens` from settings presets (`1024` / `2048` / `4096`, default `2048`; keep ≤ free-tier TPM headroom). Result = `choices[0].message.content`, trimmed; strip wrapping quotes/code fences if present.
 
 ## 8. Cleanup levels
 
@@ -153,7 +153,7 @@ You apply a spoken editing instruction to a piece of text. Output ONLY the trans
     "model": "openai/gpt-oss-120b",
     "cleanup_level": "medium",
     "include_field_context": false,
-    "max_completion_tokens": 8192
+    "max_completion_tokens": 2048
   },
   "prompts": {
     "light": "<PROMPT_LIGHT default>",
@@ -294,7 +294,7 @@ Default **`dictionary.auto_learn` = false** (PRODUCT.md). When enabled: after in
 ## 18. Locked product defaults (see docs/PRODUCT.md — do not silently reverse)
 
 - Command Mode: **dual** (Edit with selection / Generate without); selection lost at inject → insert at cursor + warning.
-- Cleanup `none` bypasses the LLM. Default cleanup **medium**. `temperature 0.2` / `max_completion_tokens` user-selectable presets (default **8192**).
+- Cleanup `none` bypasses the LLM. Default cleanup **medium**. `temperature 0.2` / `max_completion_tokens` user-selectable presets (default **2048**, max **4096**). Dictation falls back to raw STT if Groq fails.
 - Field context to LLM: **off by default**; advanced toggle only.
 - Auto-learn default **OFF**, cap 3 words/utterance when on.
 - Overlay bottom-center; labels Connecting / Recording / Processing / Edit / Generate as applicable. Engine-state matches: `Connecting` while STT opens, then `Recording` (or Edit/Generate via overlay label).
