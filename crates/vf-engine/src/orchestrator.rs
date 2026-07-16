@@ -389,13 +389,13 @@ async fn begin_utterance(rt: &mut EngineRuntime, mode: UtteranceMode) {
     };
 
     let mut partial_rx = session.subscribe_partials();
+    // STT ready → Recording first (Setup pill), then unlock feed + overlay.
+    rt.set_state(EngineState::Recording);
     {
         let mut guard = stt.lock().await;
         *guard = Some(session);
     }
     session_ready.notify_one();
-    // STT ready → Recording (or Edit/Generate) on both engine-state and overlay.
-    rt.set_state(EngineState::Recording);
     overlay::show_active(&rt.overlay_tx, &overlay_label, 0.0);
 
     // Partial STT preview on overlay (C7).

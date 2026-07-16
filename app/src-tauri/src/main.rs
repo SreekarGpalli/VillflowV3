@@ -65,6 +65,8 @@ fn save_settings(
     engine: State<'_, EngineHandle>,
 ) -> Result<(), String> {
     validate_hotkeys(&settings)?;
+    settings.llm.max_completion_tokens =
+        vf_core::normalize_max_completion_tokens(settings.llm.max_completion_tokens);
 
     // Preserve vault sealed blob if the UI omitted it; avoid wiping passphrase vault.
     {

@@ -6,13 +6,12 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use crate::error::{CloudError, CloudResult};
+use vf_core::normalize_max_completion_tokens;
 
 const GROQ_CHAT_URL: &str = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODELS_URL: &str = "https://api.groq.com/openai/v1/models";
 const TEMPERATURE: f64 = 0.2;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-/// Fallback when callers omit a budget (tests / smoke).
-const DEFAULT_MAX_COMPLETION_TOKENS: u32 = 8192;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
 fn http_client() -> &'static reqwest::Client {
@@ -124,11 +123,7 @@ pub async fn chat_completion(
         return Err(CloudError::Groq("LLM API key is empty".into()));
     }
 
-    let max_tokens = if max_completion_tokens == 0 {
-        DEFAULT_MAX_COMPLETION_TOKENS
-    } else {
-        max_completion_tokens
-    };
+    let max_tokens = normalize_max_completion_tokens(max_completion_tokens);
 
     let body = serde_json::json!({
         "model": model,
