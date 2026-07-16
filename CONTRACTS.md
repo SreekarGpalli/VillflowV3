@@ -86,7 +86,7 @@ Single process (Tauri). Startup: load settings → spawn engine thread (owns a t
 
 - `POST https://api.groq.com/openai/v1/chat/completions`, `Authorization: Bearer <llm.api_key>`. OpenAI-compatible.
 - Model = `llm.model`; shipped default `"openai/gpt-oss-120b"`. Model picker data: `GET https://api.groq.com/openai/v1/models` → list of ids (fetched live by the UI via `list_groq_models`).
-- Request: non-streaming, `temperature 0.2`, `max_completion_tokens 2048`. Result = `choices[0].message.content`, trimmed; strip wrapping quotes/code fences if present.
+- Request: non-streaming, `temperature 0.2`, `max_completion_tokens 8192`. Result = `choices[0].message.content`, trimmed; strip wrapping quotes/code fences if present.
 
 ## 8. Cleanup levels
 
@@ -207,7 +207,7 @@ pub enum InjectionMethod { ClipboardPaste, SendInputTyping }
 
 pub struct Settings { /* mirrors §10 exactly, serde Serialize/Deserialize, Default = §10 defaults */ }
 
-pub enum EngineState { Idle, Recording, Processing, Injecting }
+pub enum EngineState { Idle, Connecting, Recording, Processing, Injecting }
 pub enum EngineEvent {
     State(EngineState),
     Error(String),
@@ -292,10 +292,10 @@ Default **`dictionary.auto_learn` = false** (PRODUCT.md). When enabled: after in
 ## 18. Locked product defaults (see docs/PRODUCT.md — do not silently reverse)
 
 - Command Mode: **dual** (Edit with selection / Generate without); selection lost at inject → insert at cursor + warning.
-- Cleanup `none` bypasses the LLM. Default cleanup **medium**. `temperature 0.2` / `max_completion_tokens 2048`.
+- Cleanup `none` bypasses the LLM. Default cleanup **medium**. `temperature 0.2` / `max_completion_tokens 8192`.
 - Field context to LLM: **off by default**; advanced toggle only.
 - Auto-learn default **OFF**, cap 3 words/utterance when on.
-- Overlay bottom-center; labels Connecting / Recording / Processing / Edit / Generate as applicable.
+- Overlay bottom-center; labels Connecting / Recording / Processing / Edit / Generate as applicable. Engine-state matches: `Connecting` while STT opens, then `Recording` (or Edit/Generate via overlay label).
 - History: list + copy + **delete row** + **clear all**.
 - Keyterms: starred first, then use_count.
 - Release: **portable exe + installer**.

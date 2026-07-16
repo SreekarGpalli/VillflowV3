@@ -502,6 +502,7 @@ fn main() {
                             // Emit a plain string so every frontend gets "Recording" etc.
                             let state_str = match state {
                                 vf_core::EngineState::Idle => "Idle",
+                                vf_core::EngineState::Connecting => "Connecting",
                                 vf_core::EngineState::Recording => "Recording",
                                 vf_core::EngineState::Processing => "Processing",
                                 vf_core::EngineState::Injecting => "Injecting",

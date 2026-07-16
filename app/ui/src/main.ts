@@ -1445,7 +1445,9 @@ async function setupEngineEventListeners() {
           statusText.textContent = state;
         }
 
-        if (state === "Recording") {
+        if (state === "Connecting") {
+          statusBadge.classList.add("connecting");
+        } else if (state === "Recording") {
           statusBadge.classList.add("recording");
         } else if (state === "Processing") {
           statusBadge.classList.add("processing");

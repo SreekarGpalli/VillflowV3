@@ -273,8 +273,8 @@ async fn begin_utterance(rt: &mut EngineRuntime, mode: UtteranceMode) {
     let started = Instant::now();
     rt.pending_mode = Some(mode);
     rt.pending_finish = false;
-    // EngineState::Recording while utterance is in progress (includes Connecting).
-    rt.set_state(EngineState::Recording);
+    // Align Setup pill + overlay: Connecting until STT session is ready.
+    rt.set_state(EngineState::Connecting);
     overlay::show_connecting(&rt.overlay_tx);
 
     let overlay_label = mode.overlay_label().to_string();
@@ -333,13 +333,13 @@ async fn begin_utterance(rt: &mut EngineRuntime, mode: UtteranceMode) {
                 chunk = audio_rx.recv() => {
                     let Some(chunk) = chunk else { break; };
                     last_rms_feed.store(chunk.rms.to_bits(), std::sync::atomic::Ordering::Relaxed);
-                    overlay::show_active(&overlay_tx, &label_for_feed, chunk.rms);
                     if !live {
                         let has = stt_for_feed.lock().await.is_some();
                         if has {
                             flush_pending(&stt_for_feed, &mut pending).await;
                             live = true;
                         } else {
+                            // Stay on Connecting… until STT is ready (do not flip to Recording).
                             pending.push(chunk.pcm_s16le);
                             const MAX_PENDING_CHUNKS: usize = 500;
                             if pending.len() > MAX_PENDING_CHUNKS {
@@ -349,6 +349,7 @@ async fn begin_utterance(rt: &mut EngineRuntime, mode: UtteranceMode) {
                             continue;
                         }
                     }
+                    overlay::show_active(&overlay_tx, &label_for_feed, chunk.rms);
                     let guard = stt_for_feed.lock().await;
                     if let Some(session) = guard.as_ref() {
                         if let Err(e) = session.feed_pcm(&chunk.pcm_s16le).await {
@@ -393,7 +394,8 @@ async fn begin_utterance(rt: &mut EngineRuntime, mode: UtteranceMode) {
         *guard = Some(session);
     }
     session_ready.notify_one();
-    // Ensure overlay shows capture mode (feed task also updates on chunks).
+    // STT ready → Recording (or Edit/Generate) on both engine-state and overlay.
+    rt.set_state(EngineState::Recording);
     overlay::show_active(&rt.overlay_tx, &overlay_label, 0.0);
 
     // Partial STT preview on overlay (C7).

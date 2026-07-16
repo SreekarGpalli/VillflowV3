@@ -10,7 +10,8 @@ use crate::error::{CloudError, CloudResult};
 const GROQ_CHAT_URL: &str = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODELS_URL: &str = "https://api.groq.com/openai/v1/models";
 const TEMPERATURE: f64 = 0.2;
-const MAX_COMPLETION_TOKENS: u32 = 2048;
+/// Room for long-form cleanup / command rewrites (2048 truncated some long dictations).
+const MAX_COMPLETION_TOKENS: u32 = 8192;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 

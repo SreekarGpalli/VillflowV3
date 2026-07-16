@@ -111,6 +111,9 @@ pub enum InjectionMethod {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EngineState {
     Idle,
+    /// Mic is up; STT WebSocket still opening (matches overlay "Connecting…").
+    Connecting,
+    /// Capture live and STT session ready (or command Edit/Generate label).
     Recording,
     Processing,
     Injecting,
