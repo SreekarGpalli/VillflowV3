@@ -546,16 +546,43 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
                             {
                                 Ok(text) => text,
                                 Err(e) => {
-                                    // Never swallow STT: paste raw if cleanup fails (e.g. Groq 413 TPM).
-                                    log::error!("Groq failed (using raw transcript): {e}");
-                                    overlay::show_toast(
-                                        &rt.overlay_tx,
-                                        "Cleanup failed — pasted raw transcript",
-                                    );
-                                    rt.emit(EngineEvent::Error(format!(
-                                        "Groq failed (raw used): {e}"
-                                    )));
-                                    raw_transcript.clone()
+                                    let err_s = e.to_string();
+                                    // Free-tier TPM: retry once at 1024 before falling back to raw.
+                                    let retry = if err_s.contains("413")
+                                        || err_s.contains("too large")
+                                        || err_s.contains("TPM")
+                                    {
+                                        log::warn!(
+                                            "Groq 413/TPM on dictation — retrying with 1024 max tokens"
+                                        );
+                                        chat_completion(
+                                            &msgs.system,
+                                            &msgs.user,
+                                            &rt.settings.llm.model,
+                                            &rt.settings.llm.api_key,
+                                            1024,
+                                        )
+                                        .await
+                                        .ok()
+                                    } else {
+                                        None
+                                    };
+                                    if let Some(text) = retry {
+                                        text
+                                    } else {
+                                        // Never swallow STT: paste raw if cleanup fails.
+                                        log::error!(
+                                            "Groq failed (using raw transcript): {err_s}"
+                                        );
+                                        overlay::show_toast(
+                                            &rt.overlay_tx,
+                                            "Cleanup failed — pasted raw transcript",
+                                        );
+                                        rt.emit(EngineEvent::Error(format!(
+                                            "Groq failed (raw used): {err_s}"
+                                        )));
+                                        raw_transcript.clone()
+                                    }
                                 }
                             };
                             // Light safeguards without a mandatory second Groq call (A4 / B3).
