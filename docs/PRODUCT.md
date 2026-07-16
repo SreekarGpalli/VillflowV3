@@ -90,7 +90,7 @@ Ready when:
 - ≥1 ElevenLabs key, and  
 - Groq key present **or** cleanup level is `none`, and  
 - Mic configuration valid (system default OK), and  
-- Three hotkeys valid (each has a modifier, all distinct).
+- Two hotkeys valid (dictation + command; each has a modifier, all distinct).
 
 ### Save model
 
