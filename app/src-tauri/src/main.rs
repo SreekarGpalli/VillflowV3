@@ -2,9 +2,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::io::Write;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
@@ -17,90 +16,8 @@ use vf_store::SqliteStore;
 
 pub struct AppSettings(pub std::sync::Mutex<Settings>);
 
-/// Tracks whether the Scratchpad should be considered open.
-/// We intentionally do NOT trust `is_visible()` alone — it lies for
-/// always-on-top / hide-to-tray windows on Windows.
-pub struct ScratchpadUi {
-    open: AtomicBool,
-    last_toggle: std::sync::Mutex<Option<Instant>>,
-}
-
-impl Default for ScratchpadUi {
-    fn default() -> Self {
-        Self {
-            open: AtomicBool::new(false),
-            last_toggle: std::sync::Mutex::new(None),
-        }
-    }
-}
-
-/// Show or hide the Scratchpad. Shared by hotkey + tray.
-fn toggle_scratchpad_window(app: &AppHandle) {
-    let Some(win) = app.get_webview_window("scratchpad") else {
-        log::error!("scratchpad window missing");
-        return;
-    };
-    let ui = app.state::<ScratchpadUi>();
-
-    // Short debounce only (key-repeat protection). 120ms is enough; 350ms felt
-    // like a "broken" hotkey when users double-tapped quickly.
-    {
-        let mut last = ui.last_toggle.lock().unwrap();
-        let now = Instant::now();
-        if let Some(t) = *last {
-            if now.duration_since(t) < Duration::from_millis(120) {
-                return;
-            }
-        }
-        *last = Some(now);
-    }
-
-    // Pure flip of our flag — ignore flaky is_visible for the decision.
-    let currently_open = ui.open.load(Ordering::SeqCst);
-
-    if currently_open {
-        let _ = win.hide();
-        ui.open.store(false, Ordering::SeqCst);
-        log::info!("scratchpad: hide");
-    } else {
-        let _ = win.unminimize();
-        if let Err(e) = win.show() {
-            log::error!("scratchpad show failed: {e}");
-        }
-        let _ = win.set_always_on_top(true);
-        let _ = win.set_focus();
-        ui.open.store(true, Ordering::SeqCst);
-        // Focus the contenteditable after the window is up.
-        let _ = win.emit("scratchpad-focus", ());
-        log::info!("scratchpad: show");
-    }
-}
-
-/// Deliver dictation text into our WebViews (Scratchpad / main).
-///
-/// Only the focused VillFlow window receives the insert. Emitting to both
-/// windows previously polluted the Scratchpad whenever the user dictated into
-/// a Settings field (and vice-versa).
+/// Deliver dictation text into the Settings WebView when VillFlow is focused.
 fn emit_app_insert(app: &AppHandle, text: &str) {
-    let labels = ["scratchpad", "main"];
-    for label in labels {
-        if let Some(w) = app.get_webview_window(label) {
-            if w.is_focused().unwrap_or(false) {
-                let _ = w.emit("app-insert", text);
-                return;
-            }
-        }
-    }
-    // Neither reports focus (common with WebView2 focus quirks): prefer an
-    // open Scratchpad, else the main window.
-    if let Some(ui) = app.try_state::<ScratchpadUi>() {
-        if ui.open.load(Ordering::SeqCst) {
-            if let Some(w) = app.get_webview_window("scratchpad") {
-                let _ = w.emit("app-insert", text);
-                return;
-            }
-        }
-    }
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.emit("app-insert", text);
     }
@@ -124,14 +41,8 @@ fn validate_hotkeys(settings: &Settings) -> Result<(), String> {
             settings.hotkeys.command_mode
         )
     })?;
-    let scratchpad = KeyCombo::parse(&settings.hotkeys.scratchpad)
-        .ok_or_else(|| format!("Invalid scratchpad hotkey: {}", settings.hotkeys.scratchpad))?;
 
-    for (name, combo) in [
-        ("dictation", &dictation),
-        ("command mode", &command),
-        ("scratchpad", &scratchpad),
-    ] {
+    for (name, combo) in [("dictation", &dictation), ("command mode", &command)] {
         if !(combo.ctrl || combo.shift || combo.alt || combo.win) {
             return Err(format!(
                 "Hotkey for {name} must include at least one modifier (Ctrl/Shift/Alt/Win)"
@@ -141,12 +52,6 @@ fn validate_hotkeys(settings: &Settings) -> Result<(), String> {
 
     if dictation == command {
         return Err("Dictation and command mode hotkeys must be different".into());
-    }
-    if dictation == scratchpad {
-        return Err("Dictation and scratchpad hotkeys must be different".into());
-    }
-    if command == scratchpad {
-        return Err("Command mode and scratchpad hotkeys must be different".into());
     }
 
     Ok(())
@@ -349,16 +254,6 @@ fn insights_summary(store: State<'_, Arc<SqliteStore>>) -> Result<InsightsSummar
 }
 
 #[tauri::command]
-fn scratchpad_get(store: State<'_, Arc<SqliteStore>>) -> Result<String, String> {
-    store.scratchpad_get().map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn scratchpad_set(content: String, store: State<'_, Arc<SqliteStore>>) -> Result<(), String> {
-    store.scratchpad_set(&content).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
 fn reset_prompt(name: String) -> Result<String, String> {
     match name.as_str() {
         "light" => Ok(vf_core::PROMPT_LIGHT.to_string()),
@@ -534,16 +429,13 @@ fn main() {
         .manage(store_state)
         .manage(engine_handle_for_state)
         .manage(app_settings)
-        .manage(ScratchpadUi::default())
         .setup(move |app| {
             let app_handle = app.handle().clone();
 
             let open_main =
                 MenuItem::with_id(app, "open_main", "Open VillFlow", true, None::<&str>)?;
-            let toggle_scratch =
-                MenuItem::with_id(app, "toggle_scratch", "Scratchpad", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let tray_menu = Menu::with_items(app, &[&open_main, &toggle_scratch, &quit])?;
+            let tray_menu = Menu::with_items(app, &[&open_main, &quit])?;
 
             let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))
                 .expect("Failed to load 32x32.png icon");
@@ -575,9 +467,6 @@ fn main() {
                         let _ = main_window.set_focus();
                     }
                 }
-                "toggle_scratch" => {
-                    toggle_scratchpad_window(app);
-                }
                 "quit" => {
                     if let Some(engine) = app.try_state::<EngineHandle>() {
                         let _ = engine.send(vf_core::EngineCmd::Shutdown);
@@ -605,14 +494,6 @@ fn main() {
                 let _ = main_window.set_focus();
             }
 
-            // Pre-warm Scratchpad webview so listeners are registered before first use.
-            if let Some(sp) = app.get_webview_window("scratchpad") {
-                // Show briefly off-logic: ensure page loads while still "closed".
-                // Just accessing the window is enough if it was created at startup;
-                // emit a no-op to force webview wake on some Windows builds.
-                let _ = sp.eval("void 0");
-            }
-
             let mut rx = engine_handle_for_setup;
             tauri::async_runtime::spawn(async move {
                 while let Ok(event) = rx.recv().await {
@@ -626,10 +507,6 @@ fn main() {
                                 vf_core::EngineState::Injecting => "Injecting",
                             };
                             let _ = app_handle.emit("engine-state", state_str);
-                            // Also target Scratchpad directly (always-on-top window).
-                            if let Some(sp) = app_handle.get_webview_window("scratchpad") {
-                                let _ = sp.emit("engine-state", state_str);
-                            }
                             if let Some(tray) = app_handle.tray_by_id("main_tray") {
                                 let tooltip = format!("VillFlow - {state_str}");
                                 let _ = tray.set_tooltip(Some(tooltip.as_str()));
@@ -656,9 +533,6 @@ fn main() {
                                     .show();
                             }
                         }
-                        EngineEvent::ToggleScratchpad => {
-                            toggle_scratchpad_window(&app_handle);
-                        }
                         EngineEvent::AppInsert { text } => {
                             log::info!("app-insert: {} chars", text.chars().count());
                             emit_app_insert(&app_handle, &text);
@@ -683,11 +557,6 @@ fn main() {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.hide();
-                if window.label() == "scratchpad" {
-                    if let Some(ui) = window.try_state::<ScratchpadUi>() {
-                        ui.open.store(false, Ordering::SeqCst);
-                    }
-                }
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -711,8 +580,6 @@ fn main() {
             vault_enable_passphrase,
             vault_enable_dpapi,
             insights_summary,
-            scratchpad_get,
-            scratchpad_set,
             reset_prompt,
             set_autostart,
             autostart_status

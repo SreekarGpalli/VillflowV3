@@ -121,11 +121,10 @@ pub enum EngineEvent {
     State(EngineState),
     Error(String),
     Injected { words: u32, total_ms: u64 },
-    ToggleScratchpad,
     DictionaryLearned(String),
-    /// Insert text into our own UI (WebView). WebView2 ignores synthetic
-    /// SendInput/Ctrl+V, so when the focused window is VillFlow itself the
-    /// engine asks the shell to deliver text via frontend events instead.
+    /// Insert text into the Settings WebView. WebView2 ignores synthetic
+    /// SendInput/Ctrl+V, so when VillFlow itself is focused the engine asks
+    /// the shell to deliver text via a frontend event instead.
     AppInsert { text: String },
 }
 
@@ -201,7 +200,6 @@ fn default_true() -> bool { true }
 fn default_false() -> bool { false }
 fn default_dictation_hotkey() -> String { "Ctrl+Shift+Z".to_string() }
 fn default_command_hotkey() -> String { "Ctrl+Shift+X".to_string() }
-fn default_scratchpad_hotkey() -> String { "Ctrl+Shift+C".to_string() }
 fn default_system_default() -> String { "system_default".to_string() }
 fn default_stt_endpoint() -> String { "wss://api.elevenlabs.io".to_string() }
 fn default_stt_model() -> String { "scribe_v2_realtime".to_string() }
@@ -295,8 +293,6 @@ pub struct HotkeysSettings {
     pub dictation: String,
     #[serde(default = "default_command_hotkey")]
     pub command_mode: String,
-    #[serde(default = "default_scratchpad_hotkey")]
-    pub scratchpad: String,
 }
 
 impl Default for HotkeysSettings {
@@ -304,7 +300,6 @@ impl Default for HotkeysSettings {
         Self {
             dictation: default_dictation_hotkey(),
             command_mode: default_command_hotkey(),
-            scratchpad: default_scratchpad_hotkey(),
         }
     }
 }
@@ -524,9 +519,6 @@ pub trait Store: Send + Sync {
     /// Delete history rows older than `days` (local date). No-op if days == 0.
     fn history_purge_older_than_days(&self, days: u32) -> anyhow::Result<u64>;
 
-    // Scratchpad
-    fn scratchpad_get(&self) -> anyhow::Result<String>;
-    fn scratchpad_set(&self, content: &str) -> anyhow::Result<()>;
 
     // Insights
     fn insights_summary(&self) -> anyhow::Result<InsightsSummary>;

@@ -12,7 +12,7 @@ Fix tracker: `docs/ISSUES-AND-FIX-PLAN.md`.
 
 ## 1. Product
 
-Windows 11 push-to-talk voice dictation, tray-resident, open source / free / no accounts. Hold **Ctrl+Shift+Z** in any app → speak → on release, polished text is pasted at the cursor of the focused field. Hold **Ctrl+Shift+X** (Command Mode) → dual mode: **with selection** transform/replace; **without selection** generate new text at the cursor. Overlay labels **Edit** vs **Generate**. **Ctrl+Shift+C** toggles a floating Scratchpad. English only; speakers have Indian accents. Everything local except two cloud calls: ElevenLabs realtime STT and Groq LLM.
+Windows 11 push-to-talk voice dictation, tray-resident, open source / free / no accounts. Hold **Ctrl+Shift+Z** in any app → speak → on release, polished text is pasted at the cursor of the focused field. Hold **Ctrl+Shift+X** (Command Mode) → dual mode: **with selection** transform/replace; **without selection** generate new text at the cursor. Overlay labels **Edit** vs **Generate**. English only; speakers have Indian accents. Everything local except two cloud calls: ElevenLabs realtime STT and Groq LLM.
 
 **Latency:** best effort only — **no hard millisecond SLA**. Remove artificial delays in code; typical cloud path may be ~0.5–2s depending on network. Cleanup level `none` skips the LLM entirely (fastest).
 
@@ -25,7 +25,7 @@ Whisper mode; "backtrack" voice command; Transforms/rewrite presets; undo-AI-edi
 ## 3. Locked stack
 
 - Rust stable, target `x86_64-pc-windows-msvc`.
-- **Tauri v2** app shell hosting the Settings/History/Insights/Scratchpad windows. Frontend: **vanilla TypeScript + Vite** (Tauri default template) — no React/Vue/UI-kit dependencies. Simple dark theme, system font stack.
+- **Tauri v2** app shell hosting the Settings window (Overview, Dictation, History, Insights, etc.). Frontend: **vanilla TypeScript + Vite** (Tauri default template) — no React/Vue/UI-kit dependencies. Simple dark theme, system font stack.
 - Flow Bar overlay = **native Win32 layered window** (inside vf-engine), NOT a Tauri window.
 - Allowed crates: `windows`, `tauri` v2 (+ `tauri-plugin-notification` if needed), `cpal`, `rubato` (only if resampling needed), `tokio`, `tokio-tungstenite`, `futures-util`, `reqwest` (rustls, json), `rusqlite` (bundled), `serde`, `serde_json`, `thiserror`, `anyhow`, `base64`, `arboard`, `winreg`, `dirs`, `log` + `env_logger`. Anything else: flag it in your summary before adding.
 - Data dir: `%APPDATA%\VillFlow\` → `settings.json`, `villflow.db`, `logs\villflow.log`.
@@ -38,7 +38,7 @@ Cargo.toml              workspace root
 CONTRACTS.md            this file
 assets/icon.png         V3 lettermark source (exists)
 crates/vf-core/         [Antigravity]  shared types, settings structs + defaults, events, default prompt consts. Types only — no I/O.
-crates/vf-store/        [Antigravity]  settings.json load/save; SQLite (dictionary/history/scratchpad); insights queries. Implements vf-core::Store.
+crates/vf-store/        [Antigravity]  settings.json load/save; SQLite (dictionary/history); insights queries. Implements vf-core::Store.
 crates/vf-cloud/        [GrokBuild]    ElevenLabs realtime client + key rotation; Groq client + model list; prompt builder.
 crates/vf-engine/       [GrokBuild]    global hotkeys, audio capture, UIA context reading, text injection, Win32 overlay, auto-learn, orchestrator state machine.
 app/                    [Antigravity]  Tauri shell: src-tauri (IPC commands, tray, engine host) + ui/ (frontend).
@@ -65,7 +65,7 @@ Single process (Tauri). Startup: load settings → spawn engine thread (owns a t
 3. **Without selection** → mode Generate: record spoken instruction, Groq with command-generate prompt, insert at cursor. History `mode='command_generate'`. Overlay **Generate**.
 4. If Edit started with a selection but selection is gone at inject time: **still insert at cursor** + short warning toast (do not abort).
 
-**Scratchpad hotkey:** engine emits `EngineEvent::ToggleScratchpad`; the app shell shows/hides the Scratchpad window.
+
 
 **Hotkeys:** use a `WH_KEYBOARD_LL` low-level keyboard hook — NOT `RegisterHotKey` (need key-up detection for push-to-talk and event swallowing). Combos come from settings and re-arm on settings change. While a combo is engaged, swallow its key events.
 
@@ -137,8 +137,7 @@ You apply a spoken editing instruction to a piece of text. Output ONLY the trans
   },
   "hotkeys": {
     "dictation": "Ctrl+Shift+Z",
-    "command_mode": "Ctrl+Shift+X",
-    "scratchpad": "Ctrl+Shift+C"
+    "command_mode": "Ctrl+Shift+X"
   },
   "audio": {
     "input_device": "system_default"
@@ -196,11 +195,6 @@ CREATE TABLE IF NOT EXISTS history (
   duration_ms INTEGER NOT NULL DEFAULT 0,
   word_count INTEGER NOT NULL DEFAULT 0
 );
-CREATE TABLE IF NOT EXISTS scratchpad (
-  id INTEGER PRIMARY KEY CHECK (id = 1),
-  content TEXT NOT NULL DEFAULT '',
-  updated_at TEXT NOT NULL
-);
 ```
 
 Insights are queries over `history` (no extra tables): total words dictated; average WPM = `word_count / (duration_ms/60000)` over dictation rows; top 5 `app_name` by row count; per-day word counts for the last 365 days (streak heatmap).
@@ -218,8 +212,8 @@ pub enum EngineEvent {
     State(EngineState),
     Error(String),
     Injected { words: u32, total_ms: u64 },
-    ToggleScratchpad,
     DictionaryLearned(String),
+    AppInsert { text: String },
 }
 pub enum EngineCmd { ApplySettings(Box<Settings>), Shutdown }
 
@@ -230,7 +224,6 @@ pub struct InsightsSummary { pub total_words: i64, pub avg_wpm: f64, pub top_app
 pub trait Store: Send + Sync {
     // dictionary CRUD + star toggle + bump_use_count(words: &[String])
     // history: append(entry), list(limit, offset) -> Vec<HistoryEntry>
-    // scratchpad: get() -> String, set(content)
     // insights_summary() -> InsightsSummary
 }
 ```
@@ -241,32 +234,30 @@ Engine entry point (implemented in vf-engine): `vf_engine::spawn(settings: Setti
 
 ## 13. Tauri IPC commands (app/src-tauri — thin wrappers only)
 
-`get_settings`, `save_settings(settings)` (persist via vf-store, then `EngineCmd::ApplySettings`), `list_groq_models()` (vf-cloud), `list_input_devices()` (cpal names + "System default" pseudo-entry), `dictionary_list/add/update/delete/toggle_star`, `history_list(limit, offset)`, `history_delete` / `history_clear` (allowed — PRODUCT.md), `insights_summary()`, `scratchpad_get`, `scratchpad_set(content)`, `reset_prompt(name)` → returns the vf-core default text, `set_autostart(enabled)` + `autostart_status()` (HKCU `Software\Microsoft\Windows\CurrentVersion\Run`, value `VillFlow` = exe path, via `winreg`).
+`get_settings`, `save_settings(settings)` (persist via vf-store, then `EngineCmd::ApplySettings`), `list_groq_models()` (vf-cloud), `list_input_devices()` (cpal names + "System default" pseudo-entry), `dictionary_list/add/update/delete/toggle_star`, `history_list(limit, offset)`, `history_delete` / `history_clear` (allowed — PRODUCT.md), `insights_summary()`, `reset_prompt(name)` → returns the vf-core default text, `set_autostart(enabled)` + `autostart_status()` (HKCU `Software\Microsoft\Windows\CurrentVersion\Run`, value `VillFlow` = exe path, via `winreg`).
 
-Shell → frontend events: `engine-state`, `engine-error`, `scratchpad-toggle` (or shell handles scratchpad toggle directly).
+Shell → frontend events: `engine-state`, `engine-error`, `engine-injected`, `app-insert` (when dictating while Settings is focused).
 
 ## 14. UI windows (app/ui)
 
-**Main window "VillFlow"** — default tab **Setup** (PRODUCT.md happy path). On first run / until Ready: **always show** main window (ignore `start_minimized` until Ready after a successful save). Left nav →
-- **Setup (default):** Ready checklist; How to use (live hotkey strings); ElevenLabs + Groq keys essentials; mic; hotkeys summary; cleanup level; **Save & apply** button.
+**Main window "VillFlow"** — default tab **Overview** (PRODUCT.md happy path). On first run / until Ready: **always show** main window (ignore `start_minimized` until Ready after a successful save). Left nav →
+- **Overview (default):** Ready checklist; How to use (live hotkey strings); status; **Save & apply**.
 - Dictation: microphone, Auto Cleanup (none/light/medium/high); advanced: include field context toggle (**off** by default).
-- Hotkeys: three shortcut-capture fields (dictation, command mode, scratchpad).
+- Hotkeys: two shortcut-capture fields (dictation, command mode).
 - Dictionary: table (word, starred ★, source, use_count) with add/edit/delete/star; auto-learn toggle (**default off**).
-- AI Services / Cloud Keys: full ElevenLabs key list (add/remove/reorder; masked), endpoint; Groq key, model picker (`list_groq_models`, refresh).
+- Cloud & keys: full ElevenLabs key list (add/remove/reorder; masked), endpoint; Groq key, model picker (`list_groq_models`, refresh); key vault.
 - Prompts: editors for light/medium/high/command/command_generate each with "Reset to default".
 - Output: injection method radio (Clipboard paste / Simulated typing), restore-clipboard toggle.
 - History: recent transcripts with Copy, **per-row delete**, and **Clear all**.
 - Insights: total words, average WPM, top 5 apps, streak heatmap.
-- General: launch at startup, start minimized (honored only after Ready), show error notifications.
+- App: launch at startup, start minimized (honored only after Ready), show error notifications, history retention.
 - About: VillFlow, version, "V3", links to ElevenLabs and Groq docs.
 
-**Ready checklist:** ≥1 ElevenLabs key; Groq key **or** cleanup `none`; mic OK; three valid distinct hotkeys each with a modifier.
+**Ready checklist:** ≥1 ElevenLabs key; Groq key **or** cleanup `none`; mic OK; two valid distinct hotkeys each with a modifier.
 
 **Not ready + hotkey:** engine refuses immediately with clear message (see §5).
 
-**Scratchpad window:** floating, always-on-top, single tab, `contenteditable` with a minimal toolbar (bold, italic, bullet list). Autosaves (debounced ~500ms) via `scratchpad_set`. Ctrl+Shift+C toggles visibility; closing hides it.
-
-**Tray:** V3 icon; tooltip reflects engine state / Needs setup; menu = Open VillFlow / Scratchpad / Quit. Closing the main window hides to tray (app keeps running).
+**Tray:** V3 icon; tooltip reflects engine state / Needs setup; menu = Open VillFlow / Quit. Closing the main window hides to tray (app keeps running).
 
 ## 15. Dictionary auto-learn (vf-engine, best-effort)
 
@@ -305,7 +296,6 @@ Default **`dictionary.auto_learn` = false** (PRODUCT.md). When enabled: after in
 - Field context to LLM: **off by default**; advanced toggle only.
 - Auto-learn default **OFF**, cap 3 words/utterance when on.
 - Overlay bottom-center; labels Connecting / Recording / Processing / Edit / Generate as applicable.
-- Scratchpad always-on-top.
 - History: list + copy + **delete row** + **clear all**.
 - Keyterms: starred first, then use_count.
 - Release: **portable exe + installer**.

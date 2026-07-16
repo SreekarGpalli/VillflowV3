@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
 use std::fs;
-use rusqlite::OptionalExtension;
 use vf_core::{
     migrate_settings, DictEntry, HistoryEntry, InsightsSummary, Settings, Store,
 };
@@ -161,22 +160,6 @@ impl SqliteStore {
             [],
         )?;
         
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS scratchpad (
-              id INTEGER PRIMARY KEY CHECK (id = 1),
-              content TEXT NOT NULL DEFAULT '',
-              updated_at TEXT NOT NULL
-            );",
-            [],
-        )?;
-        
-        // Initialize scratchpad row if not exists
-        conn.execute(
-            "INSERT OR IGNORE INTO scratchpad (id, content, updated_at) 
-             VALUES (1, '', strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'));",
-            [],
-        )?;
-
         let _ = conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;");
         
         Ok(())
@@ -387,25 +370,6 @@ impl Store for SqliteStore {
         Ok(n as u64)
     }
 
-    fn scratchpad_get(&self) -> anyhow::Result<String> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("DB Mutex poisoned"))?;
-        let content: Option<String> = conn.query_row(
-            "SELECT content FROM scratchpad WHERE id = 1",
-            [],
-            |row| row.get(0),
-        ).optional()?;
-        Ok(content.unwrap_or_default())
-    }
-
-    fn scratchpad_set(&self, content: &str) -> anyhow::Result<()> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("DB Mutex poisoned"))?;
-        conn.execute(
-            "INSERT OR REPLACE INTO scratchpad (id, content, updated_at) VALUES (1, ?, strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'))",
-            rusqlite::params![content],
-        )?;
-        Ok(())
-    }
-
     fn insights_summary(&self) -> anyhow::Result<InsightsSummary> {
         let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("DB Mutex poisoned"))?;
         
@@ -559,14 +523,7 @@ mod tests {
     fn test_sqlite_store() {
         let store = SqliteStore::new_in_memory().expect("Failed to create in-memory DB");
 
-        // 1. Scratchpad test
-        let initial_scratch = store.scratchpad_get().expect("Failed to get initial scratchpad");
-        assert_eq!(initial_scratch, "");
-
-        store.scratchpad_set("hello world").expect("Failed to set scratchpad");
-        assert_eq!(store.scratchpad_get().expect("Failed to get scratchpad"), "hello world");
-
-        // 2. Dictionary test
+        // 1. Dictionary test
         let initial_dict = store.dictionary_list().expect("Failed to get initial dictionary");
         assert!(initial_dict.is_empty());
 

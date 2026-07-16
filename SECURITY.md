@@ -25,7 +25,7 @@ VillFlow stores settings and API keys **only on your machine**:
 | Path | Contents |
 | ---- | -------- |
 | `%APPDATA%\VillFlow\settings.json` | Settings; API keys encrypted at rest with **Windows DPAPI** (current user) |
-| `%APPDATA%\VillFlow\villflow.db` | Dictionary, history, scratchpad |
+| `%APPDATA%\VillFlow\villflow.db` | Dictionary, history |
 | `%APPDATA%\VillFlow\logs\villflow.log` | Application logs (keys are never logged) |
 
 API keys are held in memory as plaintext while the app runs (needed for ElevenLabs / Groq).

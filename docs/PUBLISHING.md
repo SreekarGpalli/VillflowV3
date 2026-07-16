@@ -54,7 +54,6 @@ Then on GitHub: **Releases → Draft a new release** → tag `v0.1.0` → upload
 - [ ] Add ElevenLabs + Groq keys under **AI Services**
 - [ ] Dictation (`Ctrl+Shift+Z`) into Notepad
 - [ ] Command mode (`Ctrl+Shift+X`) with and without selection
-- [ ] Scratchpad (`Ctrl+Shift+C`)
 - [ ] Confirm log at `%APPDATA%\VillFlow\logs\villflow.log`
 
 ## What is not published

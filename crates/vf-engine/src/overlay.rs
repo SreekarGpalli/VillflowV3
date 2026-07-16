@@ -297,7 +297,7 @@ unsafe fn refresh_visibility(hwnd: HWND) {
             let height = pill_height_for(visible);
             position_bottom_center(hwnd, width, height);
             // Re-assert TOPMOST on every show so the pill stays above Tauri
-            // always-on-top windows (Scratchpad). Z-order among TOPMOST peers
+            // always-on-top peers. Z-order among TOPMOST peers
             // is "last SetWindowPos wins".
             let _ = SetWindowPos(
                 hwnd,

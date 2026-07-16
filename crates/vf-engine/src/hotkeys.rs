@@ -1,8 +1,8 @@
 //! Global hotkeys via `WH_KEYBOARD_LL` — CONTRACTS §5.
 //!
-//! Push-to-talk needs key-up. Only the combo's MAIN key (Z/X/C) is ever
-//! swallowed; modifier downs/ups always pass through to the OS so modifier
-//! state can never get stuck for other apps.
+//! Push-to-talk needs key-up. Only the combo's MAIN key is ever swallowed;
+//! modifier downs/ups always pass through to the OS so modifier state can
+//! never get stuck for other apps.
 //!
 //! Shared hook state is held in a replaceable `Mutex<Option<Arc<…>>>` (not
 //! `OnceLock`) so a second engine spawn / test run can re-bind the event
@@ -30,7 +30,6 @@ use windows::Win32::UI::WindowsAndMessaging::{
 pub enum HotkeyId {
     Dictation,
     CommandMode,
-    Scratchpad,
 }
 
 /// Edge events from the hook thread.
@@ -123,7 +122,6 @@ impl KeyCombo {
 struct ComboSet {
     dictation: KeyCombo,
     command_mode: KeyCombo,
-    scratchpad: KeyCombo,
 }
 
 struct HookShared {
@@ -158,7 +156,6 @@ fn current_shared() -> Option<Arc<HookShared>> {
 pub fn start(
     dictation: &str,
     command_mode: &str,
-    scratchpad: &str,
 ) -> anyhow::Result<mpsc::UnboundedReceiver<HotkeyEvent>> {
     let (tx, rx) = mpsc::unbounded_channel();
     let combos = ComboSet {
@@ -166,8 +163,6 @@ pub fn start(
             .ok_or_else(|| anyhow::anyhow!("invalid dictation hotkey: {dictation}"))?,
         command_mode: KeyCombo::parse(command_mode)
             .ok_or_else(|| anyhow::anyhow!("invalid command_mode hotkey: {command_mode}"))?,
-        scratchpad: KeyCombo::parse(scratchpad)
-            .ok_or_else(|| anyhow::anyhow!("invalid scratchpad hotkey: {scratchpad}"))?,
     };
 
     {
@@ -281,7 +276,7 @@ pub fn shutdown() {
     HOOK_THREAD_RUNNING.store(false, Ordering::SeqCst);
 }
 
-pub fn update_combos(dictation: &str, command_mode: &str, scratchpad: &str) -> anyhow::Result<()> {
+pub fn update_combos(dictation: &str, command_mode: &str) -> anyhow::Result<()> {
     let Some(shared) = current_shared() else {
         return Ok(());
     };
@@ -290,8 +285,6 @@ pub fn update_combos(dictation: &str, command_mode: &str, scratchpad: &str) -> a
             .ok_or_else(|| anyhow::anyhow!("invalid dictation hotkey: {dictation}"))?,
         command_mode: KeyCombo::parse(command_mode)
             .ok_or_else(|| anyhow::anyhow!("invalid command_mode hotkey: {command_mode}"))?,
-        scratchpad: KeyCombo::parse(scratchpad)
-            .ok_or_else(|| anyhow::anyhow!("invalid scratchpad hotkey: {scratchpad}"))?,
     };
     *shared.combos.lock().unwrap() = set;
     Ok(())
@@ -385,7 +378,6 @@ unsafe extern "system" fn low_level_proc(code: i32, wparam: WPARAM, lparam: LPAR
         let candidates = [
             (HotkeyId::Dictation, &combos.dictation),
             (HotkeyId::CommandMode, &combos.command_mode),
-            (HotkeyId::Scratchpad, &combos.scratchpad),
         ];
         for (id, combo) in candidates {
             if combo.key_vk == vk && combo.matches_modifiers(ctrl, shift, alt, win) {
@@ -406,7 +398,6 @@ unsafe extern "system" fn low_level_proc(code: i32, wparam: WPARAM, lparam: LPAR
             let combo = match id {
                 HotkeyId::Dictation => &combos.dictation,
                 HotkeyId::CommandMode => &combos.command_mode,
-                HotkeyId::Scratchpad => &combos.scratchpad,
             };
             if combo_involves(combo, vk) {
                 engaged.remove(&id);
@@ -431,7 +422,6 @@ unsafe extern "system" fn low_level_proc(code: i32, wparam: WPARAM, lparam: LPAR
             let combo = match id {
                 HotkeyId::Dictation => &combos.dictation,
                 HotkeyId::CommandMode => &combos.command_mode,
-                HotkeyId::Scratchpad => &combos.scratchpad,
             };
             if combo.key_vk == vk {
                 swallow = true;

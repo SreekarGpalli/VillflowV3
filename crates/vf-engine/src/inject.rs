@@ -25,7 +25,7 @@ pub enum InjectOutcome {
 
 /// Inject `text` into the currently focused field.
 ///
-/// When the focused window belongs to this process (Scratchpad / Settings),
+/// When the focused window belongs to this process (Settings),
 /// returns [`InjectOutcome::InApp`] without using SendInput — WebView2 does not
 /// reliably accept synthetic Ctrl+V or unicode input.
 pub fn inject_text(
@@ -52,7 +52,7 @@ pub fn inject_text(
 }
 
 /// True when the foreground top-level window is owned by this process, or its
-/// title looks like a VillFlow window (Scratchpad / main).
+/// title looks like the VillFlow Settings window.
 pub fn foreground_is_self() -> bool {
     unsafe {
         let hwnd = GetForegroundWindow();
@@ -70,7 +70,7 @@ pub fn foreground_is_self() -> bool {
         if len > 0 {
             let title = String::from_utf16_lossy(&buf[..len as usize]);
             let t = title.to_ascii_lowercase();
-            if t.contains("scratchpad") || t == "villflow" || t.starts_with("villflow ") {
+            if t == "villflow" || t.starts_with("villflow ") {
                 return true;
             }
         }

@@ -149,7 +149,6 @@ pub async fn run(
     let mut hotkey_rx = match hotkeys::start(
         &settings.hotkeys.dictation,
         &settings.hotkeys.command_mode,
-        &settings.hotkeys.scratchpad,
     ) {
         Ok(rx) => rx,
         Err(e) => {
@@ -187,7 +186,6 @@ pub async fn run(
                         if let Err(e) = hotkeys::update_combos(
                             &rt.settings.hotkeys.dictation,
                             &rt.settings.hotkeys.command_mode,
-                            &rt.settings.hotkeys.scratchpad,
                         ) {
                             rt.emit(EngineEvent::Error(format!("hotkey update failed: {e}")));
                         }
@@ -198,16 +196,6 @@ pub async fn run(
             ev = hotkey_rx.recv() => {
                 match ev {
                     None => break,
-                    Some(HotkeyEvent::Down(HotkeyId::Scratchpad)) => {
-                        // Toggle only when idle — avoid hiding Scratchpad mid-dictation.
-                        // Edge-trigger is the main key down (not modifier releases).
-                        if rt.state == EngineState::Idle {
-                            rt.emit(EngineEvent::ToggleScratchpad);
-                        }
-                    }
-                    Some(HotkeyEvent::Up(HotkeyId::Scratchpad)) => {
-                        // No-op: scratchpad is a press-to-toggle, not push-to-talk.
-                    }
                     Some(HotkeyEvent::Down(HotkeyId::Dictation)) => {
                         if rt.state == EngineState::Idle {
                             if let Err(msg) = check_ready(&rt.settings, UtteranceMode::Dictation) {
@@ -677,7 +665,7 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
     match inject_result {
         Ok(Ok(inject::InjectOutcome::External)) => {}
         Ok(Ok(inject::InjectOutcome::InApp)) => {
-            // Scratchpad / settings WebView — deliver via shell frontend event.
+            // Settings WebView — deliver via shell frontend event.
             log::info!(
                 "emitting AppInsert ({} chars) for in-process window",
                 final_text.chars().count()

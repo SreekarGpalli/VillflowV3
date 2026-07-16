@@ -55,7 +55,7 @@ ui\node_modules\.bin\tauri.cmd build --no-bundle
 | `crates/vf-cloud` | ElevenLabs STT + Groq LLM |
 | `crates/vf-engine` | Hotkeys, audio, inject, overlay, orchestrator |
 | `app/src-tauri` | Tauri shell, tray, IPC |
-| `app/ui` | Settings / Scratchpad UI (vanilla TS + Vite) |
+| `app/ui` | Settings UI (vanilla TS + Vite) |
 | `CONTRACTS.md` | Product and architecture contracts |
 
 Agent brief files under `prompts/` and root `AGENTS.md` / `CLAUDE.md` are optional notes for multi-agent workflows. Human contributors can ignore them.
@@ -89,8 +89,8 @@ Command mode
 [ ] No selection → Generate overlay → new text at cursor
 [ ] Clear selection mid-hold after Edit started → toast about generate / insert
 
-Scratchpad & tray
-[ ] Ctrl+Shift+C toggles Scratchpad; dictate into it
+Tray
+[ ] Tray Open VillFlow / Quit work
 [ ] Close main window → app stays in tray; Quit only from tray menu
 
 Settings

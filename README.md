@@ -14,7 +14,7 @@
 | ------ | ------ |
 | **Ctrl+Shift+Z** | Dictation — hold to speak, release to paste cleaned text |
 | **Ctrl+Shift+X** | Command mode — **Edit** if text is selected (rewrite it); **Generate** if nothing is selected (insert new text at cursor). Overlay shows which mode. |
-| **Ctrl+Shift+C** | Toggle floating Scratchpad |
+
 
 Latency is **best effort** (cloud APIs vary; cleanup **None** is fastest). See [docs/PRODUCT.md](docs/PRODUCT.md).
 
@@ -104,7 +104,7 @@ Settings live at `%APPDATA%\VillFlow\settings.json`.
 | Path | Purpose |
 | ---- | ------- |
 | `%APPDATA%\VillFlow\settings.json` | Settings & API keys |
-| `%APPDATA%\VillFlow\villflow.db` | Dictionary, history, scratchpad |
+| `%APPDATA%\VillFlow\villflow.db` | Dictionary, history |
 | `%APPDATA%\VillFlow\logs\villflow.log` | Application log |
 
 ## Architecture
@@ -115,7 +115,7 @@ crates/vf-store    settings.json + SQLite
 crates/vf-cloud    ElevenLabs STT + Groq LLM
 crates/vf-engine   Hotkeys, audio, UIA, inject, overlay, orchestrator
 app/src-tauri      Tauri shell, tray, IPC
-app/ui             Settings UI + Scratchpad (vanilla TS + Vite)
+app/ui             Settings UI (vanilla TS + Vite)
 ```
 
 Product contracts and design decisions: [CONTRACTS.md](CONTRACTS.md).

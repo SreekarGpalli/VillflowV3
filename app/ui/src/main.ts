@@ -18,7 +18,6 @@ interface Settings {
   hotkeys: {
     dictation: string;
     command_mode: string;
-    scratchpad: string;
   };
   audio: {
     input_device: string;
@@ -256,7 +255,6 @@ function populateForm(settings: Settings) {
   // Hotkeys Tab
   (document.getElementById("hk-dictation") as HTMLInputElement).value = settings.hotkeys.dictation;
   (document.getElementById("hk-command") as HTMLInputElement).value = settings.hotkeys.command_mode;
-  (document.getElementById("hk-scratchpad") as HTMLInputElement).value = settings.hotkeys.scratchpad;
 
   // Dictionary Tab
   (document.getElementById("dict-auto-learn") as HTMLInputElement).checked = settings.dictionary.auto_learn;
@@ -343,7 +341,6 @@ function gatherFormSettings(): Settings {
     hotkeys: {
       dictation: (document.getElementById("hk-dictation") as HTMLInputElement).value,
       command_mode: (document.getElementById("hk-command") as HTMLInputElement).value,
-      scratchpad: (document.getElementById("hk-scratchpad") as HTMLInputElement).value
     },
     audio: {
       input_device: inputDevice
@@ -426,7 +423,6 @@ function updateHotkeySummaries(settings: Settings) {
   };
   set("howto-dictation", settings.hotkeys.dictation);
   set("howto-command", settings.hotkeys.command_mode);
-  set("howto-scratchpad", settings.hotkeys.scratchpad);
 }
 
 /** PRODUCT Ready checklist — mirrors engine gate logic for UX. */
@@ -452,23 +448,19 @@ function computeReady(settings: Settings | null): {
   const groq =
     settings.llm.cleanup_level === "none" || settings.llm.api_key.trim().length > 0;
   const mic = true; // system_default always acceptable; capture fails later if no device
-  const parts = [
-    settings.hotkeys.dictation,
-    settings.hotkeys.command_mode,
-    settings.hotkeys.scratchpad,
-  ];
+  const parts = [settings.hotkeys.dictation, settings.hotkeys.command_mode];
   const hasModifier = (s: string) =>
     /ctrl|shift|alt|win|meta|super/i.test(s) && s.includes("+");
   const hotkeys =
     parts.every((p) => p.trim().length > 0 && hasModifier(p)) &&
-    new Set(parts.map((p) => p.toLowerCase())).size === 3;
+    new Set(parts.map((p) => p.toLowerCase())).size === 2;
 
   let detail = "Ready to dictate — open Notepad and hold your dictation hotkey.";
   if (!el) detail = "Add at least one ElevenLabs API key, then Save & apply.";
   else if (!groq)
     detail = "Add a Groq API key, or set cleanup to None, then Save & apply.";
   else if (!hotkeys)
-    detail = "Set three different hotkeys, each with a modifier (Ctrl/Shift/Alt/Win).";
+    detail = "Set two different hotkeys, each with a modifier (Ctrl/Shift/Alt/Win).";
 
   return {
     ready: el && groq && mic && hotkeys,
@@ -721,7 +713,7 @@ async function loadAudioDevices() {
 // --- HOTKEY CAPTURING (MODIFIER+KEY REGISTRATION) ---
 
 function setupHotkeyRecorders() {
-  const hkInputs = ["hk-dictation", "hk-command", "hk-scratchpad"];
+  const hkInputs = ["hk-dictation", "hk-command"];
   hkInputs.forEach(id => {
     const input = document.getElementById(id) as HTMLInputElement;
     if (!input) return;
@@ -734,7 +726,7 @@ function setupHotkeyRecorders() {
     input.addEventListener("blur", () => {
       if (!input.value && savedSettings) {
         // Revert to original
-        const key = id === "hk-dictation" ? "dictation" : id === "hk-command" ? "command_mode" : "scratchpad";
+        const key = id === "hk-dictation" ? "dictation" : "command_mode";
         input.value = (savedSettings.hotkeys as any)[key];
       }
       input.placeholder = "Press shortcut keys...";
@@ -781,7 +773,7 @@ function setupHotkeyRecorders() {
       parts.push(key);
       const combo = parts.join("+");
 
-      // Reject duplicates against the other two hotkey fields.
+      // Reject duplicates against the other hotkey field.
       const others = hkInputs
         .filter((oid) => oid !== id)
         .map((oid) => (document.getElementById(oid) as HTMLInputElement | null)?.value || "");

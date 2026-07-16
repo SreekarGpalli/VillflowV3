@@ -7,10 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- **Scratchpad** feature entirely (window, hotkey, tray item, store API, UI). App is dictation-focused only.
+
 ### Redesign & vault (Phase 5)
 
-- **UI redesign**: teal accent system, refined sidebar/cards, clearer hierarchy
-- **Scratchpad rewrite**: plain-text `textarea` (reliable dictation), Markdown toolbar helpers
+- **UI redesign**: Material-style dark theme, refined sidebar/cards, clearer hierarchy
 - **Portable vault**: passphrase AES-GCM sealed keys (cross-PC) in addition to default Windows DPAPI
 - GitHub badges / links use `SreekarGpalli/VillflowV3`
 
@@ -18,7 +20,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - README / clone / badges point at `SreekarGpalli/VillflowV3`
 - GitHub Release workflow attaches portable exe + NSIS + MSI
-- Scratchpad: numbered lists, undo, clear
 - Dictionary export JSON; About page privacy/license/GitHub links
 - Product plan: all planned phases marked complete
 

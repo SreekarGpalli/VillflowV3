@@ -79,7 +79,6 @@ fn print_event(ev: &EngineEvent) {
         EngineEvent::Injected { words, total_ms } => {
             println!("[injected] words={words} total_ms={total_ms}");
         }
-        EngineEvent::ToggleScratchpad => println!("[scratchpad] toggle"),
         EngineEvent::DictionaryLearned(w) => println!("[auto-learn] {w}"),
         EngineEvent::AppInsert { text } => {
             println!("[app-insert] {} chars (in-process UI delivery)", text.chars().count());
