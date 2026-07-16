@@ -537,6 +537,7 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
                                 &msgs.user,
                                 &rt.settings.llm.model,
                                 &rt.settings.llm.api_key,
+                                rt.settings.llm.max_completion_tokens,
                             )
                             .await
                             {
@@ -611,6 +612,7 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
                 &msgs.user,
                 &rt.settings.llm.model,
                 &rt.settings.llm.api_key,
+                rt.settings.llm.max_completion_tokens,
             )
             .await
             {

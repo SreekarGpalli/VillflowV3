@@ -1252,6 +1252,18 @@
             <button class="btn" id="groq-refresh-btn" type="button">Refresh</button>
           </div>
         </div>
+        <div class="form-group">
+          <label for="groq-max-tokens">Max cleanup length</label>
+          <p style="font-size: 12px; color: var(--text-disabled); margin-bottom: 8px;">
+            Groq output budget for cleanup and commands. Higher allows longer dictation; slightly slower / costlier.
+          </p>
+          <select id="groq-max-tokens">
+            <option value="1024">Short — 1,024 tokens</option>
+            <option value="2048">Standard — 2,048 tokens</option>
+            <option value="4096">Long — 4,096 tokens</option>
+            <option value="8192" selected>Very long — 8,192 tokens (default)</option>
+          </select>
+        </div>
       </div>
       <div class="card">
         <div class="card-title">Key vault</div>

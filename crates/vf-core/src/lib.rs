@@ -197,6 +197,12 @@ pub fn migrate_settings(mut s: Settings) -> (Settings, bool) {
         changed = true;
     }
 
+    let tokens = normalize_max_completion_tokens(s.llm.max_completion_tokens);
+    if tokens != s.llm.max_completion_tokens {
+        s.llm.max_completion_tokens = tokens;
+        changed = true;
+    }
+
     (s, changed)
 }
 fn default_true() -> bool { true }
@@ -209,6 +215,22 @@ fn default_stt_model() -> String { "scribe_v2_realtime".to_string() }
 fn default_stt_language() -> String { "en".to_string() }
 fn default_llm_model() -> String { "openai/gpt-oss-120b".to_string() }
 fn default_cleanup_level() -> CleanupLevel { CleanupLevel::Medium }
+/// Allowed Groq `max_completion_tokens` presets (UI dropdown).
+pub const MAX_COMPLETION_TOKEN_PRESETS: &[u32] = &[1024, 2048, 4096, 8192];
+fn default_max_completion_tokens() -> u32 {
+    8192
+}
+/// Snap an arbitrary value to the nearest allowed preset (for migration / bad settings).
+pub fn normalize_max_completion_tokens(n: u32) -> u32 {
+    if MAX_COMPLETION_TOKEN_PRESETS.contains(&n) {
+        return n;
+    }
+    // Nearest preset by absolute distance.
+    *MAX_COMPLETION_TOKEN_PRESETS
+        .iter()
+        .min_by_key(|&&p| (p as i64 - n as i64).unsigned_abs())
+        .unwrap_or(&8192)
+}
 fn default_prompt_light() -> String { PROMPT_LIGHT.to_string() }
 fn default_prompt_medium() -> String { PROMPT_MEDIUM.to_string() }
 fn default_prompt_high() -> String { PROMPT_HIGH.to_string() }
@@ -356,6 +378,9 @@ pub struct LlmSettings {
     /// Default false per PRODUCT.md — reduces document rewrites.
     #[serde(default = "default_false")]
     pub include_field_context: bool,
+    /// Groq `max_completion_tokens` — preset only (1024 / 2048 / 4096 / 8192).
+    #[serde(default = "default_max_completion_tokens")]
+    pub max_completion_tokens: u32,
 }
 
 impl Default for LlmSettings {
@@ -365,6 +390,7 @@ impl Default for LlmSettings {
             model: default_llm_model(),
             cleanup_level: default_cleanup_level(),
             include_field_context: false,
+            max_completion_tokens: default_max_completion_tokens(),
         }
     }
 }
@@ -565,6 +591,9 @@ mod tests {
         assert_eq!(s.llm.model, "openai/gpt-oss-120b");
         assert_eq!(s.llm.cleanup_level, CleanupLevel::Medium);
         assert!(!s.llm.include_field_context);
+        assert_eq!(s.llm.max_completion_tokens, 8192);
+        assert_eq!(normalize_max_completion_tokens(3000), 2048);
+        assert_eq!(normalize_max_completion_tokens(4096), 4096);
         assert!(!s.dictionary.auto_learn);
         assert_eq!(s.prompts.light, PROMPT_LIGHT);
         assert_eq!(s.prompts.medium, PROMPT_MEDIUM);

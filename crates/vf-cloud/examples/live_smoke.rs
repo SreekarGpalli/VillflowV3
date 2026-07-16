@@ -61,6 +61,7 @@ async fn main() {
         "ping",
         &settings.llm.model,
         &settings.llm.api_key,
+        settings.llm.max_completion_tokens,
     )
     .await
     {

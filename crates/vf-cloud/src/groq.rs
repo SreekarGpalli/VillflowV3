@@ -10,9 +10,9 @@ use crate::error::{CloudError, CloudResult};
 const GROQ_CHAT_URL: &str = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODELS_URL: &str = "https://api.groq.com/openai/v1/models";
 const TEMPERATURE: f64 = 0.2;
-/// Room for long-form cleanup / command rewrites (2048 truncated some long dictations).
-const MAX_COMPLETION_TOKENS: u32 = 8192;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// Fallback when callers omit a budget (tests / smoke).
+const DEFAULT_MAX_COMPLETION_TOKENS: u32 = 8192;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
 fn http_client() -> &'static reqwest::Client {
@@ -110,20 +110,30 @@ struct ChatMessage {
 }
 
 /// Non-streaming chat completion. Returns cleaned `choices[0].message.content`.
+///
+/// `max_completion_tokens` should be a preset from
+/// [`vf_core::MAX_COMPLETION_TOKEN_PRESETS`] (engine passes settings value).
 pub async fn chat_completion(
     system: &str,
     user: &str,
     model: &str,
     api_key: &str,
+    max_completion_tokens: u32,
 ) -> CloudResult<String> {
     if api_key.trim().is_empty() {
         return Err(CloudError::Groq("LLM API key is empty".into()));
     }
 
+    let max_tokens = if max_completion_tokens == 0 {
+        DEFAULT_MAX_COMPLETION_TOKENS
+    } else {
+        max_completion_tokens
+    };
+
     let body = serde_json::json!({
         "model": model,
         "temperature": TEMPERATURE,
-        "max_completion_tokens": MAX_COMPLETION_TOKENS,
+        "max_completion_tokens": max_tokens,
         "stream": false,
         "messages": [
             { "role": "system", "content": system },
