@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-07-16
+
+### Fixed
+- **Groq free-tier 413 TPM**: completion budget presets are now 1024 / 2048 / 4096 (default **2048**); old 8192 values snap down so cleanup no longer fails with “payload too large”
+- **Dictation still works when Groq fails**: retry at 1024 tokens on 413, then paste **raw STT** with a toast instead of inserting nothing
+- **Command mode 413**: one retry at 1024 max tokens
+- **Connecting vs Recording mismatch**: Setup pill and overlay both show Connecting until STT is ready, then Recording
+- **Command Edit selection**: keep key-down selection if mid-hold re-read is empty (do not demote to Generate)
+- **Not-ready errors**: surface the real readiness message (ElevenLabs vs Groq) on engine-error
+
+### Added
+- **Max cleanup length** setting under Cloud & keys (preset token budgets for Groq)
+
 ## [0.2.0] — 2026-07-15
 
 ### Removed
