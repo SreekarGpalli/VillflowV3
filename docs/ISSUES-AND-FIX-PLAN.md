@@ -373,12 +373,12 @@ Product decisions                LOCKED
 
 ---
 
-#### C3. In-app insert (Scratchpad / Settings)
+#### C3. In-app insert (Settings WebView)
 
 | Field | Value |
 |-------|--------|
 | **Status** | accepted |
-| **Severity** | Medium (Scratchpad users) / Low (external-only) |
+| **Severity** | Low (Settings WebView only; primary path is external apps) |
 | **Recommendation** | Keep AppInsert; improve focus routing if needed |
 | **Effort** | S–M |
 | **Where** | `inject.rs`, `app/src-tauri/src/main.rs` (`emit_app_insert`), UI listeners |
@@ -481,18 +481,18 @@ Issues D1–D2 and A2 are specified end-to-end in **§5 (U1–U9)**. Below is th
 |-------|--------|
 | **Status** | done |
 | **Severity** | Low |
-| **Recommendation** | Google Material 3 dark theme applied (Settings + Scratchpad) |
+| **Recommendation** | Google Material 3 dark theme applied (Settings) |
 
 ---
 
-#### D4. Scratchpad `contenteditable`
+#### D4. Scratchpad (removed)
 
 | Field | Value |
 |-------|--------|
-| **Status** | done |
-| **Severity** | Low |
-| **Recommendation** | Rewritten as textarea Scratchpad with toolbar + theme match |
-| **Effort** | L if rewritten |
+| **Status** | removed |
+| **Severity** | — |
+| **Recommendation** | **Removed** — product is dictation-only (no notes window) |
+| **Effort** | — |
 
 ---
 
@@ -640,7 +640,7 @@ Engine fixes (A1, A4, A5) make that path *work*. **This section makes the path *
 | 2 | Sees **Setup** first | Not “General → Launch at startup”. Big **Ready** checklist. |
 | 3 | Pastes ElevenLabs key(s) + Groq key | Fields on Setup; mask secrets; links to get keys; **Apply / Save** clearly applies to engine. |
 | 4 | Sees Ready go green | Checklist: ElevenLabs ✓, Groq ✓ (if cleanup ≠ none), mic present, hotkeys valid. |
-| 5 | Reads one short “How to use” block | Defaults: hold **Ctrl+Shift+Z** dictate, **Ctrl+Shift+X** command, **Ctrl+Shift+C** scratchpad. |
+| 5 | Reads one short “How to use” block | Defaults: hold **Ctrl+Shift+Z** dictate, **Ctrl+Shift+X** command. |
 | 6 | Opens Notepad, holds Z combo | Overlay: Connecting (if needed) → **Recording** (mic actually on). Level pulse optional. |
 | 7 | Releases | Overlay **Processing** → text pastes → Idle. Tray tooltip matches. Errors: toast + optional Windows notification + **last error on Setup**. |
 | 8 | Later: tweaks | Advanced tabs (Prompts, Output, Dictionary, History, Insights, General) stay available but not on the critical path. |
@@ -721,7 +721,6 @@ Wireframe (content, not pixels):
 │  │  2. Hold Ctrl+Shift+Z, speak, release.              │ │
 │  │  3. Polished text is pasted at the cursor.          │ │
 │  │  Command: hold Ctrl+Shift+X …                       │ │
-│  │  Scratchpad: Ctrl+Shift+C                           │ │
 │  │  (strings update live from current hotkey settings) │ │
 │  └─────────────────────────────────────────────────────┘ │
 │                                                          │
@@ -740,7 +739,6 @@ Wireframe (content, not pixels):
 │  ┌─ Hotkeys (read-only summary + “Change…” → Hotkeys)  │ │
 │  │  Dictation: Ctrl+Shift+Z                            │ │
 │  │  Command:   Ctrl+Shift+X                            │ │
-│  │  Scratchpad: Ctrl+Shift+C                           │ │
 │  │  or: full capture widgets inline (preferred if easy)│ │
 │  └─────────────────────────────────────────────────────┘ │
 │                                                          │
@@ -859,7 +857,7 @@ Listen to existing events: `engine-state`, `engine-error` (already in `main.ts`)
 | Issue | Fix |
 |-------|-----|
 | `start_minimized` + first run = tray-only, user thinks app didn’t start | **First run** (no keys yet, or `settings` flag `first_run_done`): always show main window on Setup. Only honor start_minimized after ready once. |
-| Tray menu: Open / Scratchpad / Quit | Keep; tooltip: `VillFlow – Ready` / `Needs setup` / state |
+| Tray menu: Open / Quit | Keep; tooltip: `VillFlow – Ready` / `Needs setup` / state |
 | Close window = hide to tray | Keep (correct for tray app); Setup copy: “Closing hides to tray — Quit from tray menu.” |
 
 Optional settings flag: `general.onboarding_complete` or derive from `ready && user_saved_once`.
@@ -892,7 +890,6 @@ Short, always visible on Setup (not only README):
 
 1. Hold **{dictation}**, speak, release → text at cursor.  
 2. **{command}** → rewrite selection, or generate if nothing selected *(wording depends on B1)*.  
-3. **{scratchpad}** → floating notes.  
 4. Keys stay in `%APPDATA%\VillFlow\` on this PC only.  
 5. Need help building? README link.
 
@@ -918,7 +915,7 @@ Short, always visible on Setup (not only README):
 
 **Visual redesign (D3):** not required. Reuse existing cards, dark theme, save bar styles for Setup.
 
-**Scratchpad (D4):** keep; ensure How-to mentions it; AppInsert path remains engine work (C3).
+**Scratchpad (D4):** removed — AppInsert only for Settings fields when VillFlow is focused (C3).
 
 ---
 
@@ -1039,7 +1036,7 @@ No new cloud APIs required for Phase 0 UI.
 
 ### Leave until someone files an issue
 
-- D3 visual redesign, D4 Scratchpad rewrite, telemetry, accounts  
+- D3 visual redesign, telemetry, accounts (D4 Scratchpad removed)  
 - Cross-user key migration / portable encrypted vault beyond DPAPI  
 
 ---
@@ -1050,7 +1047,7 @@ No new cloud APIs required for Phase 0 UI.
 |------|--------|
 | Real GitHub URLs in README | **done** (`SreekarGpalli/VillflowV3`) |
 | Release CI: portable + installers | **done** |
-| Scratchpad toolbar polish | **done** |
+| Scratchpad | **removed** |
 | Dictionary export | **done** |
 | About page | **done** |
 
@@ -1063,7 +1060,7 @@ No new cloud APIs required for Phase 0 UI.
 | 2 Community | **done** |
 | 3 Security/polish | **done** |
 | 4 Release complete | **done** |
-| 5 UI redesign + Scratchpad rewrite + portable vault | **done** |
+| 5 UI redesign + portable vault; Scratchpad removed | **done** |
 
 **Non-goals (will not build):** accounts, telemetry, commercial packaging beyond portable+installer, full Wispr parity, multi-language v1.
 
@@ -1109,7 +1106,6 @@ Settings / UI / UX (§5.14)
 [ ] Dictation → browser text field
 [ ] Command with selection → rewrite
 [ ] Command without selection → (per B1) toast or generate
-[ ] Scratchpad toggle + dictate into Scratchpad
 [ ] Change hotkey on Setup/Hotkeys, save, re-test
 [ ] Quit from tray cleans up (no stuck modifiers)
 [ ] First run: window visible; second run with start_minimized: OK after onboarding
@@ -1172,7 +1168,6 @@ Skip for v1
 | Types / defaults | `crates/vf-core/src/lib.rs` |
 | Tauri shell / tray | `app/src-tauri/src/main.rs` |
 | Settings UI | `app/ui/src/main.ts`, `app/ui/index.html` |
-| Scratchpad | `app/ui/src/scratchpad.ts`, `app/ui/scratchpad.html` |
 | Prior verify notes | `docs/internal/VERIFY-REPORT.md` |
 | **Happy-path UI plan** | **This file §5** |
 
@@ -1186,6 +1181,7 @@ Skip for v1
 | 2026-07-15 | Added **§5 Happy path Settings/UI/UX** (U1–U9) |
 | 2026-07-15 | **Owner decision session:** locked PRODUCT.md; updated CONTRACTS + this file §0; ready to implement Phase 0 |
 | 2026-07-15 | Phase 0 implemented + user-tested OK; Phase 1 completed (C2 toast, timings, last dictation, CONTRIBUTING checklist) |
+| 2026-07-16 | Scratchpad feature removed (dictation-only product) |
 | 2026-07-15 | Phase 2: speech_ms WPM, multi-monitor overlay, partials, history retention, a11y, issue templates |
 | 2026-07-15 | Phase 3: DPAPI keys, history export, mic test, PR template — planned phases 0–3 complete |
 
@@ -1201,7 +1197,7 @@ For an open-source, free, no-account, GitHub-download dictation app:
 
 **Must fix (settings/UI/UX — §5):** Setup-first tab, Ready checklist, keys on first screen, Save & apply, status/last error, first-run window, in-app how-to. Do **not** treat UI as optional polish after the engine — without it the happy path is still broken for GitHub users.
 
-**Keep / defer:** dense advanced tabs (Prompts, Insights, etc.), brand redesign, Scratchpad rewrite, installers, Wispr-level polish.
+**Keep / defer:** dense advanced tabs (Prompts, Insights, etc.), brand redesign, installers, Wispr-level polish.
 
 **Drop from “requirements”:** hard 700ms SLA, forbidding history delete, commercial assumptions.
 

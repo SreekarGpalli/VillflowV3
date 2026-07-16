@@ -59,7 +59,6 @@ First public release.
 
 - **Push-to-talk dictation** (`Ctrl+Shift+Z`): hold, speak, release — cleaned text pastes at the cursor in any app
 - **Command mode** (`Ctrl+Shift+X`): transform selected text, or generate new content when nothing is selected
-- **Scratchpad** (`Ctrl+Shift+C`): floating always-on-top notes with rich-text toolbar and autosave
 - **ElevenLabs** realtime STT with ordered API-key failover
 - **Groq** cleanup (none / light / medium / high) and command prompts
 - System tray app (hide-to-tray, state tooltip, notifications)

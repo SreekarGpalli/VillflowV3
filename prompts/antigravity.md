@@ -24,9 +24,8 @@ Prereq: P1–P3 committed (vf-cloud and vf-engine exist). Read `CONTRACTS.md` §
 
 1. Implement every IPC command in §13 in `app/src-tauri`, wired to the real `vf-store` `Store` impl and `vf-cloud::list_groq_models` / cpal device enumeration. Engine-dependent behavior (`save_settings` → `ApplySettings` push, engine events) may use a `// TODO(vf): wired in P5` stub ONLY at the engine boundary.
 2. Build the full main window UI per §14: General, Dictation, Hotkeys, Dictionary, AI Services, Prompts, Output, History, Insights, About. Hotkey capture fields record modifier+key combos as strings like `Ctrl+Shift+Z`. ElevenLabs keys: ordered list, masked, add/remove/reorder. Model picker fetches live with refresh; default `openai/gpt-oss-120b` preselected when the list can't be fetched.
-3. Scratchpad window per §14 (single tab, minimal toolbar: bold/italic/bullets, debounced autosave, always-on-top). 
-4. Dark minimal theme, system font stack, no UI libraries. Every settings control round-trips through `get_settings`/`save_settings` (no UI-only state).
-5. Frontend builds (`npm run build` inside app/ui), `cargo build --workspace` green, commit: `antigravity: P4: full UI`.
+3. Dark minimal theme, system font stack, no UI libraries. Every settings control round-trips through `get_settings`/`save_settings` (no UI-only state). (No Scratchpad window — product is dictation-only.)
+4. Frontend builds (`npm run build` inside app/ui), `cargo build --workspace` green, commit: `antigravity: P4: full UI`.
 
 Do not touch `crates/vf-cloud` or `crates/vf-engine`.
 
@@ -37,7 +36,7 @@ Do not touch `crates/vf-cloud` or `crates/vf-engine`.
 Prereq: P4 verified. Read `CONTRACTS.md` §5, §12, §13.
 
 1. On app startup: load settings via vf-store → `vf_engine::spawn(settings, store)` → hold `EngineHandle` in Tauri state.
-2. Bridge engine events → tray tooltip/state, `engine-state` + `engine-error` frontend events, Windows notification on error when enabled, `ToggleScratchpad` → show/hide scratchpad window.
+2. Bridge engine events → tray tooltip/state, `engine-state` + `engine-error` frontend events, Windows notification on error when enabled.
 3. `save_settings` now pushes `EngineCmd::ApplySettings`. Implement `set_autostart`/`autostart_status` per §13. Implement `start_minimized` (launch hidden to tray) and close-to-tray per §14.
 4. Verify the full loop compiles and the app runs: tray appears, main window opens, engine reaches Idle.
 5. `cargo build --workspace` green, commit: `antigravity: P5: integration`.

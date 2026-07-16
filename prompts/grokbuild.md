@@ -30,7 +30,7 @@ Scope: the Windows system layer + orchestrator. Everything per CONTRACTS §5, §
 4. **Context reader** (§5): UI Automation via `windows` crate — focused element text near caret (cap ~1500 chars), selected text (for Command Mode), window title + process exe name. All best-effort with graceful `None`.
 5. **Injection** (§5, §10): `clipboard_paste` = save clipboard (arboard) → set text → SendInput Ctrl+V → short settle delay → restore when `restore_clipboard`; `sendinput_typing` = KEYEVENTF_UNICODE stream. Target app keeps focus throughout.
 6. **Overlay** (§5): Win32 layered pill window (TOPMOST | NOACTIVATE | TOOLWINDOW), bottom-center; states "Recording" (+ level pulse) / "Processing" / brief error toast; hidden when Idle. Simple text + minimal animation only.
-7. **Orchestrator** (§5): full dictation flow 1–5 and Command Mode flow using vf-cloud; cleanup `none` skips LLM; history rows appended via `Store`; scratchpad hotkey → `ToggleScratchpad` event; errors per §5.
+7. **Orchestrator** (§5): full dictation flow 1–5 and Command Mode flow using vf-cloud; cleanup `none` skips LLM; history rows appended via `Store`; errors per §5. (No Scratchpad — product is dictation-only.)
 8. **Auto-learn** (§15) exactly as specified, including `bump_use_count`.
 9. Provide `examples/headless.rs`: runs the engine from a settings file for manual testing without the Tauri app (prints events to stdout).
 10. `cargo build --workspace` + clippy clean, commit: `grokbuild: P3: vf-engine`.
