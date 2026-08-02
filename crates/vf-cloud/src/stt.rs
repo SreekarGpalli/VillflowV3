@@ -232,6 +232,25 @@ pub struct SttSession {
     join: tokio::task::JoinHandle<()>,
 }
 
+/// Cloneable handle for streaming PCM without holding a session lock across await.
+///
+/// Obtain via [`SttSession::feed_handle`]. Safe to use from the audio feed task
+/// while the orchestrator still owns the parent [`SttSession`] for `commit()`.
+#[derive(Clone)]
+pub struct SttFeedHandle {
+    cmd_tx: mpsc::Sender<SessionCmd>,
+}
+
+impl SttFeedHandle {
+    /// Feed a PCM 16 kHz mono s16le chunk.
+    pub async fn feed_pcm(&self, pcm_s16le: &[u8]) -> CloudResult<()> {
+        self.cmd_tx
+            .send(SessionCmd::Audio(pcm_s16le.to_vec()))
+            .await
+            .map_err(|_| CloudError::SessionClosed)
+    }
+}
+
 impl SttSession {
     /// Open a session for one utterance.
     ///
@@ -240,7 +259,9 @@ impl SttSession {
     /// mid-utterance reconnect can re-send it.
     pub async fn open(settings: SttSettings, keyterms: Vec<String>) -> CloudResult<Self> {
         let rotator = KeyRotator::new(settings.api_keys.clone())?;
-        let (cmd_tx, cmd_rx) = mpsc::channel::<SessionCmd>(64);
+        // Deep queue: long utterances + slow WS must not block the feed task
+        // (which previously held a mutex across send and dropped end audio).
+        let (cmd_tx, cmd_rx) = mpsc::channel::<SessionCmd>(512);
         let (partial_tx, _) = broadcast::channel::<String>(32);
         let (ready_tx, ready_rx) = oneshot::channel::<CloudResult<()>>();
 
@@ -268,6 +289,13 @@ impl SttSession {
                 join.abort();
                 Err(CloudError::Timeout("STT connect timed out".into()))
             }
+        }
+    }
+
+    /// Cloneable feed handle (does not consume the session).
+    pub fn feed_handle(&self) -> SttFeedHandle {
+        SttFeedHandle {
+            cmd_tx: self.cmd_tx.clone(),
         }
     }
 
@@ -314,9 +342,19 @@ async fn session_loop(
     let mut audio_buffer: Vec<Vec<u8>> = Vec::new();
     let mut commit_reply: Option<oneshot::Sender<CloudResult<String>>> = None;
     let mut last_error: Option<CloudError> = None;
-    let mut held_transcript: Option<String> = None;
+    // Multiple committed segments (premature or multi-commit) are concatenated.
+    let mut committed_parts: Vec<String> = Vec::new();
     let mut session_started = false;
     let mut dead = false;
+
+    fn join_transcript_parts(parts: &[String]) -> String {
+        parts
+            .iter()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
 
     // Establish initial connection (with rotation on handshake failures).
     let mut conn = match connect_with_rotation(&settings, &keyterms, &mut rotator).await {
@@ -402,17 +440,25 @@ async fn session_loop(
                             session_started = true;
                         }
 
-                        if let Some(t) = held_transcript.take() {
-                            rotator.mark_good();
-                            let _ = reply.send(Ok(t));
-                            let _ = conn.ws.close(None).await;
-                            return;
-                        }
                         if let Some(err) = last_error.take() {
-                            let _ = reply.send(Err(err));
+                            // Prefer any partial commits we already have over a hard fail
+                            // when the session died after producing text.
+                            let partial = join_transcript_parts(&committed_parts);
+                            if !partial.is_empty() {
+                                log::warn!(
+                                    "STT commit with prior error; returning partial transcript ({err})"
+                                );
+                                rotator.mark_good();
+                                let _ = reply.send(Ok(partial));
+                            } else {
+                                let _ = reply.send(Err(err));
+                            }
                             return;
                         }
 
+                        // Always send a final commit so audio after any premature
+                        // segment is included. Previously we returned a held segment
+                        // immediately and dropped the rest of the utterance.
                         commit_reply = Some(reply);
                         if let Err(err) = send_audio_or_reconnect(
                             &mut conn,
@@ -424,7 +470,15 @@ async fn session_loop(
                             &audio_buffer,
                         ).await {
                             if let Some(r) = commit_reply.take() {
-                                let _ = r.send(Err(err));
+                                let partial = join_transcript_parts(&committed_parts);
+                                if !partial.is_empty() {
+                                    log::warn!(
+                                        "STT final commit send failed; returning partial: {err}"
+                                    );
+                                    let _ = r.send(Ok(partial));
+                                } else {
+                                    let _ = r.send(Err(err));
+                                }
                             }
                             return;
                         }
@@ -489,16 +543,26 @@ async fn session_loop(
                                 }
                             }
                             "committed_transcript"
-                            | "committed_transcript_with_timestamps" => {
+                            | "committed_transcript_with_timestamps"
+                            | "final_transcript"
+                            | "final_transcript_with_timestamps" => {
                                 let transcript = parsed.text.unwrap_or_default();
+                                if !transcript.trim().is_empty() {
+                                    committed_parts.push(transcript);
+                                }
                                 if let Some(r) = commit_reply.take() {
                                     rotator.mark_good();
-                                    let _ = r.send(Ok(transcript));
+                                    let full = join_transcript_parts(&committed_parts);
+                                    let _ = r.send(Ok(full));
                                     let _ = conn.ws.close(None).await;
                                     return;
                                 }
-                                // Premature commit — hold until caller commits.
-                                held_transcript = Some(transcript);
+                                // Premature/server-side commit: keep accumulating;
+                                // final caller commit will append remaining audio.
+                                log::debug!(
+                                    "STT committed segment mid-utterance ({} parts so far)",
+                                    committed_parts.len()
+                                );
                             }
                             other => {
                                 if let Some(kind) = RotatableError::from_message_type(other) {
@@ -551,11 +615,26 @@ async fn session_loop(
                                     let err_text = parsed
                                         .error
                                         .unwrap_or_else(|| other.to_string());
-                                    let err = CloudError::msg(err_text);
+                                    // Empty final commit after premature segments is expected;
+                                    // return what we already have instead of failing the utterance.
+                                    let is_empty_commit = err_text.contains("0.00s")
+                                        || err_text.contains("uncommitted audio")
+                                        || err_text.contains("at least 0.3s");
                                     if let Some(r) = commit_reply.take() {
-                                        let _ = r.send(Err(err));
+                                        let partial = join_transcript_parts(&committed_parts);
+                                        if is_empty_commit && !partial.is_empty() {
+                                            log::info!(
+                                                "STT empty final commit after segments; using partial"
+                                            );
+                                            rotator.mark_good();
+                                            let _ = r.send(Ok(partial));
+                                            let _ = conn.ws.close(None).await;
+                                            return;
+                                        }
+                                        let _ = r.send(Err(CloudError::msg(err_text)));
                                         return;
                                     }
+                                    let err = CloudError::msg(err_text);
                                     last_error = Some(err);
                                     dead = true;
                                 }

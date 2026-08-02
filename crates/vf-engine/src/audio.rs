@@ -140,8 +140,9 @@ fn run_capture_loop(
     let in_hz = config.sample_rate.0;
     let channels = config.channels as usize;
 
-    // Larger bound reduces silent frame drops under resampler/consumer load.
-    let (raw_tx, raw_rx) = std::sync::mpsc::sync_channel::<Vec<f32>>(256);
+    // Deep bound: silent try_send drops in the cpal callback were clipping long
+    // utterances when the resampler fell behind (lost frames never reach STT).
+    let (raw_tx, raw_rx) = std::sync::mpsc::sync_channel::<Vec<f32>>(2048);
 
     let stream = match sample_format {
         SampleFormat::F32 => build_stream::<f32>(&device, &config, channels, raw_tx)?,
@@ -262,6 +263,8 @@ where
     f32: cpal::FromSample<T>,
 {
     let err_fn = |e| log::error!("cpal stream error: {e}");
+    let drop_count = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let drop_count_cb = drop_count.clone();
     let stream = device.build_input_stream(
         config,
         move |data: &[T], _| {
@@ -276,11 +279,19 @@ where
                     mono.push(sum / channels as f32);
                 }
             }
-            let _ = raw_tx.try_send(mono);
+            if raw_tx.try_send(mono).is_err() {
+                let n = drop_count_cb.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                // Rate-limit: log every 50th drop so long holds are visible in logs.
+                if n == 1 || n % 50 == 0 {
+                    log::warn!("audio capture queue full — dropped frames (count={n})");
+                }
+            }
         },
         err_fn,
         None,
     )?;
+    // `drop_count` is only used from the callback (cloned Arc); local handle unused.
+    let _ = drop_count;
     Ok(stream)
 }
 

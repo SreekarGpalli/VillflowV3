@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-08-02
+
+### Fixed
+- **Long dictation cut off at the end**: wait up to 5s for the mic feed to fully drain into STT before commit (was a hard 80ms timeout that dropped trailing speech on bigger holds)
+- **STT backpressure**: deepen the realtime command queue (64 → 512) so long utterances are less likely to stall the feed path
+- **Feed task lock**: stream audio through a cloneable feed handle so the session mutex is not held across network I/O
+- **Multi-segment STT commits**: concatenate premature/server commits instead of keeping only the first segment
+- **Silent mic frame drops**: deeper capture queue and warn in the log when frames are dropped
+- **Groq gpt-oss truncation**: use low reasoning effort for cleanup so the token budget goes to the answer; on `finish_reason=length`, fall back to the raw STT transcript
+- **Cleanup looks cut**: if cleaned text is much shorter than raw and ends unfinished, paste raw STT instead
+
+### Added
+- Per-utterance log line with raw/final character and word counts plus `final_vs_raw=%` for easier diagnosis
+
 ## [0.2.1] — 2026-07-16
 
 ### Fixed

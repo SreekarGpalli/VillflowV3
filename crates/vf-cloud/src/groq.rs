@@ -108,6 +108,13 @@ struct ChatMessage {
     content: Option<String>,
 }
 
+/// True for Groq GPT-OSS reasoning models where `max_completion_tokens` is shared
+/// with internal reasoning and default medium effort can starve the visible answer.
+fn is_gpt_oss_model(model: &str) -> bool {
+    let m = model.to_ascii_lowercase();
+    m.contains("gpt-oss")
+}
+
 /// Non-streaming chat completion. Returns cleaned `choices[0].message.content`.
 ///
 /// `max_completion_tokens` should be a preset from
@@ -125,7 +132,9 @@ pub async fn chat_completion(
 
     let max_tokens = normalize_max_completion_tokens(max_completion_tokens);
 
-    let body = serde_json::json!({
+    // Dictation cleanup is a simple rewrite — keep reasoning low so token budget
+    // goes to the cleaned text (otherwise long transcripts get mid-sentence cuts).
+    let mut body = serde_json::json!({
         "model": model,
         "temperature": TEMPERATURE,
         "max_completion_tokens": max_tokens,
@@ -135,6 +144,16 @@ pub async fn chat_completion(
             { "role": "user", "content": user }
         ]
     });
+    if is_gpt_oss_model(model) {
+        body.as_object_mut().unwrap().insert(
+            "reasoning_effort".into(),
+            serde_json::Value::String("low".into()),
+        );
+        // Don't ship reasoning payload back; content-only is enough for cleanup.
+        body.as_object_mut()
+            .unwrap()
+            .insert("include_reasoning".into(), serde_json::Value::Bool(false));
+    }
 
     let resp = http_client()
         .post(GROQ_CHAT_URL)
@@ -161,7 +180,23 @@ pub async fn chat_completion(
 
     let value: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| CloudError::Groq(e.to_string()))?;
-    parse_chat_completion_content(&value)
+
+    let finish_reason = value
+        .pointer("/choices/0/finish_reason")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let cleaned = parse_chat_completion_content(&value)?;
+    if finish_reason == "length" {
+        log::warn!(
+            "Groq finish_reason=length (output may be truncated; chars={})",
+            cleaned.len()
+        );
+        return Err(CloudError::Groq(format!(
+            "completion truncated (finish_reason=length, chars={})",
+            cleaned.len()
+        )));
+    }
+    Ok(cleaned)
 }
 
 /// Live model list from Groq (`GET /openai/v1/models` → ids).

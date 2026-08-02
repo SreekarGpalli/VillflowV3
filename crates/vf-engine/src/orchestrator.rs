@@ -308,18 +308,30 @@ async fn begin_utterance(rt: &mut EngineRuntime, mode: UtteranceMode) {
 
     let feed_task = tokio::spawn(async move {
         let mut pending: Vec<Vec<u8>> = Vec::new();
-        let mut live = false;
+        // Cloneable feed handle — never hold the session mutex across await.
+        let mut feed: Option<vf_cloud::SttFeedHandle> = None;
 
-        async fn flush_pending(
+        async fn take_feed(
             stt: &Arc<Mutex<Option<SttSession>>>,
-            pending: &mut Vec<Vec<u8>>,
-        ) {
+            feed: &mut Option<vf_cloud::SttFeedHandle>,
+        ) -> bool {
+            if feed.is_some() {
+                return true;
+            }
+            let guard = stt.lock().await;
+            if let Some(session) = guard.as_ref() {
+                *feed = Some(session.feed_handle());
+                true
+            } else {
+                false
+            }
+        }
+
+        async fn flush_pending(feed: &vf_cloud::SttFeedHandle, pending: &mut Vec<Vec<u8>>) {
             for pcm in pending.drain(..) {
-                let guard = stt.lock().await;
-                if let Some(session) = guard.as_ref() {
-                    if let Err(e) = session.feed_pcm(&pcm).await {
-                        log::warn!("STT feed error: {e}");
-                    }
+                if let Err(e) = feed.feed_pcm(&pcm).await {
+                    log::warn!("STT feed error: {e}");
+                    break;
                 }
             }
         }
@@ -329,36 +341,41 @@ async fn begin_utterance(rt: &mut EngineRuntime, mode: UtteranceMode) {
                 chunk = audio_rx.recv() => {
                     let Some(chunk) = chunk else { break; };
                     last_rms_feed.store(chunk.rms.to_bits(), std::sync::atomic::Ordering::Relaxed);
-                    if !live {
-                        let has = stt_for_feed.lock().await.is_some();
-                        if has {
-                            flush_pending(&stt_for_feed, &mut pending).await;
-                            live = true;
+                    if feed.is_none() {
+                        if take_feed(&stt_for_feed, &mut feed).await {
+                            if let Some(ref f) = feed {
+                                flush_pending(f, &mut pending).await;
+                            }
                         } else {
                             // Stay on Connecting… until STT is ready (do not flip to Recording).
                             pending.push(chunk.pcm_s16le);
-                            const MAX_PENDING_CHUNKS: usize = 500;
+                            // Deep buffer for slow STT open on long first holds.
+                            const MAX_PENDING_CHUNKS: usize = 2000;
                             if pending.len() > MAX_PENDING_CHUNKS {
                                 let drop_n = pending.len() - MAX_PENDING_CHUNKS;
                                 pending.drain(0..drop_n);
+                                log::warn!(
+                                    "STT not ready — dropped {drop_n} oldest pre-connect audio chunks"
+                                );
                             }
                             continue;
                         }
                     }
                     overlay::show_active(&overlay_tx, &label_for_feed, chunk.rms);
-                    let guard = stt_for_feed.lock().await;
-                    if let Some(session) = guard.as_ref() {
-                        if let Err(e) = session.feed_pcm(&chunk.pcm_s16le).await {
+                    if let Some(ref f) = feed {
+                        if let Err(e) = f.feed_pcm(&chunk.pcm_s16le).await {
                             log::warn!("STT feed error: {e}");
+                            break;
                         }
                     } else {
                         break;
                     }
                 }
                 _ = session_ready_feed.notified() => {
-                    if !live && stt_for_feed.lock().await.is_some() {
-                        flush_pending(&stt_for_feed, &mut pending).await;
-                        live = true;
+                    if feed.is_none() && take_feed(&stt_for_feed, &mut feed).await {
+                        if let Some(ref f) = feed {
+                            flush_pending(f, &mut pending).await;
+                        }
                     }
                 }
             }
@@ -432,7 +449,7 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
         return;
     };
 
-    // Stop capture first so the feed task drains and exits.
+    // Stop capture first so the feed task drains the remaining queue and exits.
     // Speech window ends when capture stops (key-up) — used for WPM (D6).
     let speech_ms = active.started.elapsed().as_millis() as i64;
     if let Some(c) = active.capture.take() {
@@ -441,9 +458,18 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
     if let Some(t) = active.partial_task.take() {
         t.abort();
     }
+    // CRITICAL: wait for the feed task to push *all* remaining PCM into STT
+    // before commit. An 80ms timeout previously aborted mid-drain on long
+    // utterances / WS backpressure, cutting the last 20–30% of speech.
     if let Some(t) = active.feed_task.take() {
-        // Brief drain so last PCM reaches STT; don't sit on the happy path long (A4).
-        let _ = tokio::time::timeout(std::time::Duration::from_millis(80), t).await;
+        match tokio::time::timeout(std::time::Duration::from_secs(5), t).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) if e.is_cancelled() => {}
+            Ok(Err(e)) => log::warn!("STT feed task ended with error: {e}"),
+            Err(_) => {
+                log::warn!("STT feed drain timed out after 5s — committing with buffered audio");
+            }
+        }
     }
 
     rt.set_state(EngineState::Processing);
@@ -594,7 +620,17 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
                                     &prompt_ctx.field_context,
                                     &raw_transcript,
                                 );
-                            if !suspicious {
+                            // Cleanup sometimes ends mid-thought with "…" / "..." while the
+                            // raw STT is longer — prefer full transcript over a clipped rewrite.
+                            let looks_cut = cleanup_looks_truncated(&stripped, &raw_transcript);
+                            if looks_cut {
+                                log::warn!(
+                                    "dictation cleanup looks truncated (raw {} chars → cleaned {}); using raw",
+                                    raw_transcript.len(),
+                                    stripped.len()
+                                );
+                                raw_transcript.clone()
+                            } else if !suspicious {
                                 stripped
                             } else if !field_context.is_empty() {
                                 // Context was on and output looks like a rewrite — use raw STT.
@@ -754,8 +790,17 @@ async fn finish_utterance(rt: &mut EngineRuntime) {
     let stt_ms = t_stt_done.saturating_duration_since(started).as_millis();
     let llm_ms = t_llm_done.saturating_duration_since(t_stt_done).as_millis();
     let inject_ms = Instant::now().saturating_duration_since(t_llm_done).as_millis();
+    let raw_chars = raw_transcript.chars().count();
+    let final_chars = final_text.chars().count();
+    let raw_words = word_count(&raw_transcript);
+    let final_words = word_count(&final_text);
+    let len_pct = if raw_chars > 0 {
+        (final_chars * 100) / raw_chars
+    } else {
+        0
+    };
     log::info!(
-        "utterance timings: total={total_ms}ms stt_phase={stt_ms}ms llm_phase={llm_ms}ms inject_phase={inject_ms}ms mode={effective_mode:?}"
+        "utterance timings: total={total_ms}ms stt_phase={stt_ms}ms llm_phase={llm_ms}ms inject_phase={inject_ms}ms mode={effective_mode:?} raw_chars={raw_chars} final_chars={final_chars} raw_words={raw_words} final_words={final_words} final_vs_raw={len_pct}% speech_ms={speech_ms}"
     );
 
     // `EngineEvent::Injected.words` is `u32` (vf-core); SQLite `HistoryEntry.word_count` is `i64`.
@@ -825,4 +870,27 @@ fn dictionary_words_ordered(store: &Arc<dyn Store>) -> Vec<String> {
         }
         Err(_) => Vec::new(),
     }
+}
+
+/// Heuristic: cleaned text lost a large share of the transcript and ends like a cut-off.
+///
+/// Normal filler-removal cleanup is ~10–30% shorter; we only flag stronger cuts
+/// that also look unfinished (ellipsis or no sentence-ending punctuation).
+fn cleanup_looks_truncated(cleaned: &str, raw: &str) -> bool {
+    let cleaned = cleaned.trim();
+    let raw = raw.trim();
+    if cleaned.is_empty() || raw.is_empty() {
+        return false;
+    }
+    let raw_words = raw.split_whitespace().count().max(1);
+    let clean_words = cleaned.split_whitespace().count();
+    // Cleaner is allowed to shrink a lot (fillers); only flag severe cuts.
+    if clean_words * 100 / raw_words >= 70 {
+        return false;
+    }
+    let ends_ellipsis = cleaned.ends_with("...")
+        || cleaned.ends_with('…')
+        || cleaned.ends_with("..");
+    let ends_sentence = cleaned.ends_with(|c: char| matches!(c, '.' | '!' | '?' | '"' | '\''));
+    ends_ellipsis || !ends_sentence
 }

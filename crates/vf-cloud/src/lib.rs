@@ -22,5 +22,5 @@ pub use prompt::{
 pub use sanitize::{dictation_output_suspicious, strip_context_echo};
 pub use stt::{
     build_ws_url, encode_audio_chunk, parse_rotatable_http_status, KeyRotator, RotatableError,
-    ServerMessage, SttSession,
+    ServerMessage, SttFeedHandle, SttSession,
 };
